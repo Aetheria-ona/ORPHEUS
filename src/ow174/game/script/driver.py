@@ -214,6 +214,7 @@ WHEEL_PLAY_GRAPHS = {
 }
 MAX_WHEEL_CALLOUTS = 32
 WHEEL_CALLOUT_MS = 2000
+NEED_HEALING_CRITERION = 0x0D80000000000724
 # The ultimate: its charge #342e is server data (no graph adds to it; the ultimate's graph sets it to 0 when
 # it starts), its cost #338e comes from the Entries. Combat credits it (combat.py through ult_charge.py);
 # the passive fills the rest in ULT_SECONDS (0: never) so a server with no combat rule still charges, and
@@ -674,6 +675,39 @@ class BodyWorld(runtime.World):
                                  selected.value() if selected else None, tuple(values))
         self.wheel_callouts.append(event)
         del self.wheel_callouts[:-MAX_WHEEL_CALLOUTS]
+        self._play_healing_callout(instance, node)
+
+    def _play_healing_callout(self, instance: runtime.Instance, node: graph.Node) -> None:
+        if self.match is None:
+            return
+        action = (instance.graph.index, node.pos)
+        if action == (0x0686, 40):
+            # 0686 sends its broadcast only when no directed message was selected.
+            broadcast = instance.graph.node(44).field("m_condition")
+            if not expr.truthy(instance.evaluate(broadcast)):
+                return
+            speaker = self.body
+        elif action == (0x05AD, 166):
+            # This directed fallback sends text without the preceding criteria action.
+            speaker = expr.to_entity(instance.evaluate(node.field("m_63CB0D07")))
+        else:
+            return
+        self.match.combat.voice.wheel(speaker, NEED_HEALING_CRITERION)
+
+    def action_criteria(self, instance: runtime.Instance, node: graph.Node) -> None:
+        if self.match is None or instance.graph.index not in (0x05AD, 0x0686):
+            return
+        speaker = expr.to_entity(instance.evaluate(node.field("m_targets")))
+        identifier = instance.evaluate(node.field("m_identifier"))
+        if isinstance(identifier, Asset):
+            self.match.combat.voice.wheel(speaker, identifier.guid)
+
+    def play_equipped_voice(self, instance: runtime.Instance) -> bool:
+        if self.match is None:
+            return False
+        query = instance.graph.node(67).field("m_value")
+        effect = instance.evaluate(query)
+        return isinstance(effect, Asset) and self.match.combat.voice.equipped(self.body, effect.guid)
 
     def velocity_action(self, instance, node):
         from ow174.game import mccree

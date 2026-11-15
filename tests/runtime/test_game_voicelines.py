@@ -2,7 +2,9 @@
 spawned body reaches the client and stays in step, read back through the body-frame client model of
 test_script_driver.py."""
 
+import json
 import logging
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -11,9 +13,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ow174.game import voicelines
+from ow174.game.content import heroes
 from ow174.game.script import decode
 from ow174.game.script import graph as graphs
 from ow174.game.script.driver import POLLED_SWITCHES, SETTLE_FRAMES, TRUSTED_NATIVES, BodyScript
+from tests.runtime.test_game_combat import Run
 
 START = 1000
 
@@ -49,6 +53,94 @@ class StubPlayer:
     def __init__(self, script: BodyScript) -> None:
         self.body_script = script
         self.name = "Tester"
+
+
+class PlayerVoiceTests(unittest.TestCase):
+    def setUp(self):
+        fixture_root = Path(os.environ.get(
+            "ORPHEUS_BEHAVIOR_FIXTURES", Path(__file__).resolve().parents[2] / "fixtures" / "behavior",
+        ))
+        fixture = json.loads((fixture_root / "player-voice-v1.json").read_text(encoding="utf-8"))
+        self.input = fixture["input"]
+        self.expected = fixture["expected"]
+        self.run = Run(names=("Speaker", "Ally", "Enemy"))
+        self.speaker, ally, _ = self.run.players
+        ally.team = self.speaker.team
+        self.run.match.switch_hero(self.speaker, heroes()[int(self.input["hero"], 16)])
+        self.speaker.skin = (int(self.input["skin"], 16), False)
+        self.advance(40)
+        self.enterContext(
+            mock.patch.object(voicelines, "player_voice_catalog", return_value=self.input["fixtures"])
+        )
+
+    def advance(self, frames):
+        for _ in range(frames):
+            self.run.step({})
+
+    def assert_audience(self, friendly, hostile):
+        for player, cues in zip(self.run.players, (friendly, friendly, hostile), strict=True):
+            expected = [{
+                "+0x78": {"+0x0": self.speaker.body},
+                "+0x7C": {"+0x0": player.body},
+                "+0x80": {"+0x0": 0xFFFFFFFF},
+                "+0x88": int(stimulus, 16),
+                "+0x90": int(line, 16),
+                "+0x98": 0,
+                "+0xA0": 0,
+            } for stimulus, line in cues]
+            self.assertEqual(player.client.messages(27500), expected, player.name)
+
+    def test_wheel_actions_use_the_speakers_voice_set_and_team(self):
+        for action in self.input["actions"]:
+            self.run.match.communication_action(self.speaker, {
+                "+0x78": 0x0A90000000000000 | int(action, 16), "+0x80": True,
+            })
+            self.advance(130)
+        self.assert_audience(self.expected["wheel_friendly"], self.expected["wheel_hostile"])
+
+    def test_equipped_wheel_slots_deliver_notices_without_replaying_the_client_effect(self):
+        body = self.speaker.body_script
+        body.world.voice_effects = tuple(int(effect, 16) for effect in self.input["equipped_effects"])
+        for action in self.input["equipped_choices"]:
+            self.run.match.communication_action(self.speaker, {
+                "+0x78": 0x0A90000000000000 | int(action, 16), "+0x80": True,
+            })
+            self.advance(130)
+            self.assertFalse(any(event.node == 72 for event in body.world.wheel_callouts))
+        self.assert_audience(self.expected["equipped_all"], self.expected["equipped_all"])
+
+    def test_need_healing_plays_at_full_and_reduced_health_without_an_aimed_target(self):
+        vitals = self.run.match.combat.body_vitals(self.speaker.body, self.speaker)
+        action = 0x0A90000000000000 | int(self.input["healing_action"], 16)
+        for damage in (0, 70):
+            if damage:
+                vitals.damage(damage)
+            self.run.match.communication_action(self.speaker, {"+0x78": action, "+0x80": False})
+            self.advance(130)
+            self.assert_audience(self.expected["healing_friendly"], [])
+            for player in self.run.players:
+                player.client.reliable.clear()
+
+    def test_aimed_healing_plays_one_notice_for_each_authored_branch(self):
+        action = 0x0A90000000000000 | int(self.input["healing_action"], 16)
+        _, ally, enemy = self.run.players
+        cases = (
+            (self.input["hero"], "healing_support_directed"),
+            (self.input["healing_directed_hero"], "healing_friendly"),
+        )
+        for hero, expected in cases:
+            self.run.match.switch_hero(self.speaker, heroes()[int(hero, 16)])
+            self.speaker.skin = (int(self.input["skin"], 16), False)
+            y = self.speaker.mover.position[1]
+            self.speaker.mover.position[:] = [0.0, y, 0.0]
+            self.speaker.mover.yaw = self.speaker.mover.pitch = 0
+            ally.mover.position[:] = [0.0, y, 10.0]
+            enemy.mover.position[:] = [10.0, y, 10.0]
+            self.run.match.communication_action(self.speaker, {"+0x78": action, "+0x80": True})
+            self.advance(130)
+            self.assert_audience(self.expected[expected], [])
+            for player in self.run.players:
+                player.client.reliable.clear()
 
 
 def spawned_body(hero: int):

@@ -565,6 +565,13 @@ class World:
     def voice_stimulus_began(self, state: "State") -> None:
         """Optional presentation hook for permissive combat worlds."""
 
+    def action_criteria(self, instance: "Instance", node: Node) -> None:
+        """Apply an authored criterion in worlds that provide a consumer."""
+
+    def play_equipped_voice(self, instance: "Instance") -> bool:
+        """Return whether this match has handled the equipped voice selection."""
+        return False
+
     def voice_category_service(self, instance):
         """Return the host callback or declare a known absent voice service with None."""
         return NotImplemented

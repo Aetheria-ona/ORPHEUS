@@ -46,6 +46,7 @@ GREETING_DURATION_DATA = "greeting_durations_174.json"
 GREETING_CLIP_DATA = "greeting_clips_174.json"
 EMOTE_ANY_CATEGORY = 0xFFFFFFFFFFFFFFFF  # reserved default lookup key
 VOICE_EFFECT_DATA = "voice_effects_174.json"
+PLAYER_VOICE_DATA = "player_voice_174.json"
 
 LOBBY_RUNTIME_DATA = (
     "schemas_174.json", "retail_templates.json", *CLIENT_CATALOGS,

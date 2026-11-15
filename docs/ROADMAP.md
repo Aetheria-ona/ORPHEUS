@@ -152,6 +152,10 @@ A checked item records evidence for that specific scope. Its parent remains open
     recipient lifecycle, live model overrides and client playback remain open.
     The spray graph resolves the equipped unlock from the chosen slot.
     The voice graph resolves the equipped .00D playback effect.
+    The optional player voice catalog sends stock callouts and equipped
+    lines through reliable voice notices. Offline checks cover Hello,
+    Acknowledge, Thanks, Need Healing and equipped slots. One 104319
+    session reported Mercy's equipped line 7E05.
     Native probes verify the playback counter window and wrap.
     Owner and observer frames now retain the slot and counter step
     of each pending voice pulse until ACK. Delayed voice use

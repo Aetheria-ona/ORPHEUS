@@ -4,6 +4,15 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-16
+
+#### Communication and equipped voice wheels
+
+- Resolve stock callouts through the speaker's hero and skin voice set and send them to the speaker and teammates. Play Need Healing on both the untargeted marker path and the aimed text-only fallback while preserving authored directed cues.
+- Resolve equipped lines from the saved loadout when the client cannot resolve the effect locally. Known effects send one reliable voice notice. Missing mappings use the authored client pulse.
+- Generate the optional voice tables from a local 104319 installation. The extractor resolved 1,043 voice unlocks across 139 distinct effects. The original client reported Mercy's equipped line 7E05. The local tester confirmed Hello, Thanks and Need Healing.
+- Passed Ruff, 921 public Python tests, six dashboard tests and 54 prepared-runtime communication and voice tests. The runtime checks use the shared synthetic voice contract and the candidate's locally generated voice catalog.
+
 ### 2026-11-12
 
 #### Strict World query behavior contract

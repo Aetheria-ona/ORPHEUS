@@ -27,6 +27,7 @@ from ow174.paths import (
     GREETING_DURATION_DATA,
     LOBBY_RUNTIME_DATA,
     MATCH_RUNTIME_DATA,
+    PLAYER_VOICE_DATA,
     ROOT,
     ULT_CHARGE_OVERRIDE,
     VOICE_EFFECT_DATA,
@@ -71,7 +72,8 @@ def prepare(
     if charge_override.is_file():
         inputs[f"data/{ULT_CHARGE_OVERRIDE}"] = charge_override
     for name in (EMOTE_ALIAS_DATA, EMOTE_BLEND_TREE_DATA, EMOTE_CLIP_DATA, EMOTE_DURATION_DATA,
-                 EMOTE_SCALAR_DATA, EMOTE_TAGGED_DATA, GREETING_DURATION_DATA, VOICE_EFFECT_DATA):
+                 EMOTE_SCALAR_DATA, EMOTE_TAGGED_DATA, GREETING_DURATION_DATA, PLAYER_VOICE_DATA,
+                 VOICE_EFFECT_DATA):
         metadata = source / "data" / name
         if metadata.is_file():
             inputs[f"data/{name}"] = metadata

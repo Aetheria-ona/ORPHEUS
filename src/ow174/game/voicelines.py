@@ -1,4 +1,4 @@
-"""In-match hero spawn barks and Talon hit voices.
+"""In-match hero voice playback.
 
 When a player spawns, the server makes the player's own body statescript enter one of the hero's
 voice-stimulus states, and the client plays the bark. No new wire message is needed: a voice stimulus
@@ -36,7 +36,11 @@ first networked stimulus the hero has unless `PREFERRED_STIMULUS` names one; fil
 once you have heard the lines in the game and want a particular one.
 """
 
+import json
 import logging
+from functools import lru_cache
+
+from ow174.paths import DATA_DIR, PLAYER_VOICE_DATA
 
 log = logging.getLogger("ow174.game")
 
@@ -57,6 +61,18 @@ BARK_SECONDS = 4.0
 # hero GUID (the 02E...) -> the voice-stimulus GUID (0x0EE0...) to play on spawn, overriding the default
 # "first networked stimulus" pick. Empty by default; add entries once you have picked lines in the game.
 PREFERRED_STIMULUS: dict[int, int] = {}
+
+@lru_cache(maxsize=1)
+def player_voice_catalog():
+    path = DATA_DIR / PLAYER_VOICE_DATA
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as source:
+        return json.load(source)
+
+
+def _voice_key(guid: int) -> str:
+    return f"0x{guid:016X}"
 
 
 def talon_hit(shooter, victim) -> None:
@@ -149,12 +165,53 @@ def heroes_with_lines(bodies=None) -> dict[int, str]:
 
 
 class VoiceLines:
-    """A match's spawn barks: begins a voice stimulus on a player's body when he spawns, and ends it a few
-    seconds later. Owned by Combat (combat.py), which calls spawned() and expire()."""
+    """A match's player voice notices and timed spawn barks."""
 
     def __init__(self, match) -> None:
         self.match = match
         self.pending: list[tuple[float, object, object, int]] = []  # (end, body_script, instance, index)
+
+    def wheel(self, body: int, identifier: int) -> None:
+        catalog = player_voice_catalog()
+        stimuli = catalog.get("criteria", {}).get(_voice_key(identifier), ())
+        if not stimuli:
+            return
+        speaker = self.match._message_player(body)
+        if speaker is None:
+            return
+        for stimulus in stimuli:
+            if self._player_cue(catalog, speaker, int(stimulus, 16), team_only=True):
+                break
+
+    def equipped(self, body: int, effect: int) -> bool:
+        catalog = player_voice_catalog()
+        stimulus = catalog.get("equipped", {}).get(_voice_key(effect))
+        if stimulus is None:
+            return False
+        speaker = self.match._message_player(body)
+        return speaker is not None and self._player_cue(catalog, speaker, int(stimulus, 16), team_only=False)
+
+    def _player_cue(self, catalog, speaker, stimulus: int, *, team_only: bool) -> bool:
+        base_set = catalog.get("heroes", {}).get(_voice_key(speaker.hero.guid))
+        if base_set is None:
+            return False
+        skin_sets = catalog["skins"].get(_voice_key(speaker.skin[0]), {})
+        voice_set = catalog["sets"].get(skin_sets.get(base_set, base_set), {})
+        variants = voice_set.get(_voice_key(stimulus), ())
+        if not variants:
+            return False
+        choice = 0
+        if len(variants) > 1:
+            choice = self.match.environment.randbelow(len(variants), callsite="voice.player_line")
+        line = int(variants[choice], 16)
+        for viewer in self.match.players:
+            if viewer.gone or not self.match._shown(viewer):
+                continue
+            ally = viewer is speaker or (not self.match.game_map.free_for_all and viewer.team == speaker.team)
+            if not team_only or ally:
+                self.match.ensure_remote_body(viewer, speaker)
+                queue_voice_notice(viewer, speaker.body, stimulus, line, anchor=speaker.body)
+        return True
 
     def spawned(self, player, now: float) -> None:
         """Play the player's spawn line. A no-op when the feature is off, the player has no body script, or
