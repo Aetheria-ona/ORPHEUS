@@ -4,6 +4,7 @@ season intros it showed (36200)."""
 
 from functools import partial
 
+from ow174.accounts.profile import normalize_setting_entries
 from ow174.jam.groups import RANKED_OUT, SOCIAL_OUT
 from ow174.lobby.router import Router
 from ow174.lobby.session import Session
@@ -18,6 +19,7 @@ VALUES_FIELD = "+0x130"
 
 
 def save_block(session: Session, value: dict, field: str) -> None:
+    """Replace one full 20802 settings block (22200-22203) in profile.settings."""
     session.profile.settings[field] = value.get("+0x78")
     session.save()
     session.log(f"[<<<] Settings {field} saved")
@@ -38,14 +40,14 @@ _register_block_handlers()
 
 @routes.on(SOCIAL_OUT, 22204)
 def save_values(session: Session, value: dict) -> None:
-    """Merge the changed entries into the saved list, matching them by setting id."""
+    """Merge the changed entries into the saved list by canonical +0x8 key."""
     settings = session.profile.settings
-    by_setting_id = {}
-    for entry in settings.get(VALUES_FIELD, []):
+    by_setting_id: dict[int, dict[str, int]] = {}
+    for entry in normalize_setting_entries(settings.get(VALUES_FIELD, [])):
         by_setting_id[entry["+0x8"]] = entry
     changed = value.get("+0x78") or []
-    for entry in changed:
-        by_setting_id[entry.get("+0x8")] = entry
+    for entry in normalize_setting_entries(changed):
+        by_setting_id[entry["+0x8"]] = entry
     settings[VALUES_FIELD] = list(by_setting_id.values())
     session.save()
     session.log(f"[<<<] {len(changed)} setting values saved")

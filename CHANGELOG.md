@@ -4,6 +4,14 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-15
+
+#### Profile settings normalization and shared contract
+
+- Normalized `profile.settings["+0x130"]` compound keys (`+0x8`) as signed 32-bit integers and preserved 64-bit `+0x0` values in `Profile.from_dict` and `save_values` (22204), rejecting out-of-range or boolean values.
+- Documented full-block replacement for 22200–22203 and last-write-wins merge semantics for 22204, and added the synthetic `fixtures/behavior/profile-settings-v1.json` contract with `tests/public/test_profile_settings_contracts.py`.
+- Passed `tests/public/test_profile_settings_contracts.py` (2 tests) and `git diff --check`. Original-client acceptance remains pending.
+
 ### 2026-11-12
 
 #### Strict World query behavior contract
