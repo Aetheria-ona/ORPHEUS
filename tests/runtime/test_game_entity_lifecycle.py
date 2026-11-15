@@ -11,11 +11,12 @@ from unittest.mock import Mock, patch
 from tests.runtime.test_game_packet_budget import connection, decoded
 from tests.runtime.test_game_repeated_lifecycles import wire_frame
 from tests.runtime.test_game_server import REAPER, pick
+from tests.runtime.test_game_world import read_movement
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ow174.game import heroselect, messages, world
-from ow174.game.bits import BitWriter
+from ow174.game.bits import BitReader, BitWriter
 from ow174.game.commands import FIRE, Command
 from ow174.game.content import SOLDIER, heroes
 from ow174.game.environment import SystemEnvironment
@@ -84,8 +85,10 @@ class FrozenCreateTests(unittest.TestCase):
             return lease
 
         match.combat = SimpleNamespace(vitals={}, projectiles=SimpleNamespace(lease=leased))
+        match.tick = 5000
         with patch.object(match, "start_body_script", side_effect=start):
             create = match.own_body_updates(owner)[0]
+        match.tick = 5003
         self.assertIs(create.stream, callback)
         with patch("ow174.game.match.world.create", side_effect=self.capture):
             original = create.build(0)
@@ -95,6 +98,15 @@ class FrozenCreateTests(unittest.TestCase):
             self.assertEqual(create.build(0), original)
         self.assertEqual(create.entity, 0xA0000101)
         self.assertEqual(create.movement.position, (0, 1, 2))
+        # The create's state goes at the tick it was made in, so the client's kept states of its own body
+        # take the later records (match.own_body_updates); the packet's record stays at the packet frame.
+        self.assertEqual(original[3]["frame_back"], world.CREATE_BASE - 5000)
+        self.assertIsNone(create.movement.frame)
+
+    def test_own_create_state_frame_lets_later_records_in(self):
+        out = BitWriter()
+        world.write_movement(out, Movement((0.0, 1.0, 2.0)), world.CREATE_BASE - 5000, world.CREATE_BASE)
+        self.assertEqual(read_movement(BitReader(out.getvalue()), world.CREATE_BASE)["frame"], 5000)
 
     def test_remote_create_freezes_data_and_keeps_the_observer_arrival_gate(self):
         match, owner = Match.__new__(Match), self.owner()

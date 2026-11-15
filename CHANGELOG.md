@@ -6,6 +6,30 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Rocket Punch start flash
+
+- Put the own body's create movement state at the create's tick, not at the
+  create path's default `0xFFFFFFFE`. The original client keeps every body's
+  movement states, its own one's too, and takes a record only when its frame is
+  above the newest kept one, compared unsigned (client RVA `7CA7D3`..`7CA7E7`,
+  before the record goes on to component 59). At `0xFFFFFFFE` the own body's
+  kept state stayed the spawn pose for good.
+- While Rocket Punch's `STU_4773DA56` registration (`0D06` #138) is on, the
+  client draws the first-person view from those kept states. It turns #138 on
+  by itself at the release, before the server's frame, so the view flashed to
+  the spawn pose at the start of every dash. Send the owner its body's records
+  from the charge (`0D06` ChaseVar #23, at least 0.2 s before the dash) and
+  while a `STU_4773DA56` registration is on.
+- Send #138 and its child #141 to the owner as on again, as retail does. This
+  replaces the "Rocket Punch view" withholding below.
+- Live A/B run with the original client on the Practice Range, with both
+  changes above, standing still while charging: 22 punches in blocks of six,
+  with #138 withheld or sent, full charge and taps. No flash at the start, and
+  the view stayed on the body through every dash. Nothing else odd was seen.
+- Tests: public `registration_view` window checks, the own create's frame in
+  `test_game_entity_lifecycle.py`, and the Rocket Punch runtime regressions now
+  expect records from the charge and #138 sent.
+
 #### Rocket Punch view
 
 - Leave Rocket Punch's `STU_4773DA56` registration (`0D06` #138, under the

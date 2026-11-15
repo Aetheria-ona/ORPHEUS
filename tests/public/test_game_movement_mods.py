@@ -173,5 +173,40 @@ class ServerMotionRecordTests(unittest.TestCase):
         self.assertEqual(correction.command_ack(self.player, 129), 129)
 
 
+def punch_component(index=0x0D06):
+    """Rocket Punch's charge (#23) and the dash's registration (#138), both off."""
+    definition = graph([
+        node(23, "STUStatescriptStateChaseVar", state=0),
+        node(138, "STU_4773DA56", state=1),
+        node(140, "STU_TEST_OTHER", state=2),
+    ])
+    definition.index = index
+    component = runtime.Component(0xA0000101)
+    instance = component.create(definition, init=False)
+    instance.initialized = True
+    return component, instance
+
+
+class RegistrationViewTests(unittest.TestCase):
+    """While a STU_4773DA56 registration may be on, the owner gets its body's records."""
+
+    def test_the_charge_or_a_registration_opens_the_window(self):
+        for index in (0, 1):
+            component, instance = punch_component()
+            self.assertFalse(correction.registration_view(component))
+            instance.state(index).active = True
+            self.assertTrue(correction.registration_view(component))
+
+    def test_another_state_or_the_same_position_in_another_graph_does_not(self):
+        component, instance = punch_component()
+        instance.state(2).active = True
+        self.assertFalse(correction.registration_view(component))
+        component, instance = punch_component(0x01C9)
+        instance.state(0).active = True
+        self.assertFalse(correction.registration_view(component))
+        instance.state(1).active = True  # Roadhog's hook victim registration, say
+        self.assertTrue(correction.registration_view(component))
+
+
 if __name__ == "__main__":
     unittest.main()

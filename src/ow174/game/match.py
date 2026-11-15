@@ -196,6 +196,7 @@ class ShownController:
         self.create_acked = True
 
 
+
 class Player:
     def __init__(
         self,
@@ -412,7 +413,9 @@ class Player:
         script = self.body_script
         active = statescript_mods(script.component) if script else {}
         self.mover.track_mods(active, frame)
-        if script is not None and server_only_mods(script.component, active):
+        if script is not None and (
+            server_only_mods(script.component, active) or correction.registration_view(script.component)
+        ):
             correction.server_motion(self, frame)
 
     def new_body(self, entity: int) -> None:
@@ -750,14 +753,19 @@ class Match:
         return player.spawned and player.has_body and player.client is not None
 
     def own_body_updates(self, viewer: Player) -> list[EntityUpdate]:
-        """The viewer's own body: its movement state rides in the create (at frame 0xFFFFFFFE) and in a
-        movement record at the packet frame."""
+        """The viewer's own body: its movement state rides in the create and in a movement record at the
+        packet frame. The create's state goes at this tick, not at the create path's default 0xFFFFFFFE:
+        the client keeps every body's states, its own one's too, and takes a record only when its frame is
+        above the newest one kept, compared unsigned (0x7FF7896DA7D3..0x7FF7896DA7E7, before the record goes
+        on to component 59). At 0xFFFFFFFE no later record would ever get in, and while a STU_4773DA56
+        registration is on the client draws its own view from those kept states (Rocket Punch's dash: at
+        the spawn point the create left there)."""
         state = deepcopy(viewer.pose())
         create = EntityUpdate(viewer.body, OP_CREATE, movement=state)
         self.start_body_script(viewer, create)
         # The new script must exist before its projectile lease is captured. The create's
         # stream remains the native driver's arrival gate; only the payload is frozen here.
-        create.build = self._body_builder(viewer, state, own=True)
+        create.build = self._body_builder(viewer, state, own=True, frame=self.tick)
         return [create]
 
     def _body_create(
@@ -765,8 +773,11 @@ class Match:
     ) -> world.RecordWriter:
         return self._body_builder(owner, state, own)(origin)
 
-    def _body_builder(self, owner: Player, state: Movement | None, own: bool = False):
-        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner."""
+    def _body_builder(
+        self, owner: Player, state: Movement | None, own: bool = False, frame: int | None = None
+    ):
+        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner.
+        `frame`: the frame of the movement state (None: the create path's default)."""
         vitals = self.combat.vitals.get(owner.body)
         if vitals is None:
             health, armour, shields = pools.body_pools(owner.hero.guid)
@@ -782,6 +793,7 @@ class Match:
         definition, skin = owner.hero.body, tuple(owner.skin)
         position, rotation = tuple(owner.mover.position), _rotation(owner.mover.yaw)
         components, state = deepcopy(components), deepcopy(state)
+        frame_back = 1 if frame is None else (world.CREATE_BASE - frame) & 0xFFFFFFFF
 
         def build(origin: int) -> world.RecordWriter:
             return world.create(
@@ -792,6 +804,7 @@ class Match:
                 position=position,
                 rotation=rotation,
                 movement=state,
+                frame_back=frame_back,
                 skin=skin,
             )
 
