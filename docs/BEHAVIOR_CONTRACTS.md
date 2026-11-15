@@ -57,8 +57,10 @@ mod: records from the first moved frame through a 250 ms tail. It pins the
 104319 Rocket Punch dash (`0D06` state 42) and the client's throttle function.
 The [prepared-runtime regression](../tests/runtime/test_doomfist_rocket_punch.py)
 runs Rocket Punch with real command input for minimum and full charge, a
-turning view, cancellation and a wall. Original-client presentation of the
-dash remains pending: the view drops below the floor while it runs.
+turning view, cancellation and a wall. It also checks that the owner's frames
+leave out the dash's `STU_4773DA56` registration (`0D06` #138) and its child
+(#141). With #138 on, the original client draws the first-person view below
+the Practice Range spawn room for the whole dash.
 
 ## Strict World queries
 

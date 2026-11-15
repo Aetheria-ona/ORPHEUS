@@ -85,6 +85,23 @@ class RocketPunchTests(unittest.TestCase):
         self.assertFalse(self.state(punch, DASH).counter)
         self.assertFalse(self.state(punch, DASH_MOD).counter)
 
+    def test_the_owner_never_sees_the_dash_registration(self):
+        """#138 (STU_4773DA56) and #141 run during the dash but stay off in the owner's frames: on the
+        original client they put the first-person view below the spawn room."""
+        player, punch = self.spawn(flat_world(1.0))
+        withheld = [self.state(punch, position) for position in (138, 141)]
+        seen = []
+        for step in range(14 + 20):
+            self.frame += 1
+            self.harness.command(player, self.frame, buttons=SECONDARY if step < 14 else 0)
+            if self.state(punch, DASH).active:
+                seen.append([state.active for state in withheld])
+                snap = player.body_script.snapshot()
+                self.assertFalse({(punch.id, state.index) for state in withheld} & set(snap.states))
+                self.assertIn((punch.id, self.state(punch, DASH).index), snap.states)
+        self.assertTrue(seen)
+        self.assertTrue(all(all(active) for active in seen))
+
     def test_a_wall_stops_the_dash(self):
         player, punch = self.spawn(World(FLOOR + wall(-5.0, 4.0, 5.0, 4.0, 1.0, 4.0)))
         travel, _, records = self.punch(player, punch, 14)

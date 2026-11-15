@@ -6,6 +6,24 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Rocket Punch view
+
+- Leave Rocket Punch's `STU_4773DA56` registration (`0D06` #138, under the
+  dash's Stack #22) and its child `STU_D09BD154` (#141) out of the owner's
+  frames. The server still runs both. While the original client has #138 on,
+  it draws the first-person view at a fixed spot below the Practice Range
+  spawn room, wherever the body is, for the whole dash. Which client data puts
+  it there is unknown: the registration's code past its component lookup is
+  obfuscated. Roadhog's hook victim (`01C9` #22) and `007D` #7 use the same
+  class and are unchanged and untested.
+- Live A/B runs with the original client (three punches per variant): with
+  #138 left out the view follows the dash. Leaving out only #141, or sending
+  the aim lock #81, did not help. Away from spawn, the view jumped back below
+  the spawn room.
+- Add a public test for the withheld states and a prepared-runtime check that
+  the owner's frames leave out #138 and #141 for the whole dash while the
+  server keeps them on.
+
 #### Rocket Punch dash
 
 - Send the owner its body's movement records while a mod of a server-only

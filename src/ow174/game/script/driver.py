@@ -156,6 +156,13 @@ TRUSTED_NATIVES = {
     "STU_D3EB8D87",  # ... the selected controller's component 92 is absent for a player
 }
 POLLED_SWITCHES = {"STUStatescriptStateBooleanSwitch", "STU_DEBD057B"}
+# States (graph, node position) the server runs but never shows the owner's client as on. Rocket Punch's
+# registration STU_4773DA56 (#138, the dash's Stack #22 subgraph) and its child STU_D09BD154 (#141): while
+# the original 104319 client has #138 on, it draws the first-person view at a fixed spot below the Practice
+# Range spawn room, wherever the body is, for the whole dash. Left off, the view follows the body through the
+# dash. Its source on the client is unknown: the registration's code past its component lookup is obfuscated.
+# Roadhog's hook victim (01C9 #22) and 007D #7 use the same class, untested.
+OWNER_WITHHELD = {(0x0D06, 138), (0x0D06, 141)}
 # STU_C5243F93 action categories from the 104319 .096 records.
 WHEEL_ACTION_PREFIX = 0x0A90000000000000
 WHEEL_CATEGORY_TYPE = 0x0C880000000000CD
@@ -1428,6 +1435,8 @@ class BodyScript(ReplicatedBody):
     @staticmethod
     def _add_state(snap: Snapshot, owner: int, index: int, state: runtime.State) -> None:
         cls = state.node.cls
+        if (state.instance.graph.index, state.node.pos) in OWNER_WITHHELD:
+            return
         if not state.networked or not (state.active or (cls in stec_classes() and state.counter)):
             return
         if not sendable(cls, state.active):
