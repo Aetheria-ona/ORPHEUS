@@ -21,7 +21,7 @@ from ow174.game.commands import FIRE, Command
 from ow174.game.content import SOLDIER, heroes
 from ow174.game.environment import SystemEnvironment
 from ow174.game.link import ACK, KIND_CONTROL, KIND_FRAME, LinkCipher, Packet, ReceiveWindow
-from ow174.game.match import Match, card_message
+from ow174.game.match import CREATE_LEAD, Match, card_message
 from ow174.game.observers import Observers
 from ow174.game.script import decode, expr
 from ow174.game.script.driver import BodyScript
@@ -98,10 +98,14 @@ class FrozenCreateTests(unittest.TestCase):
             self.assertEqual(create.build(0), original)
         self.assertEqual(create.entity, 0xA0000101)
         self.assertEqual(create.movement.position, (0, 1, 2))
-        # The create's state goes at the tick it was made in, so the client's kept states of its own body
-        # take the later records (match.own_body_updates); the packet's record stays at the packet frame.
-        self.assertEqual(original[3]["frame_back"], world.CREATE_BASE - 5000)
+        # The create's state goes CREATE_LEAD frames past the packet's tick: ahead of every frame the client
+        # predicted, yet below the later records' frames (match.own_body_updates). The packet's record stays
+        # at the packet frame.
+        self.assertEqual(original[3]["frame_back"], world.CREATE_BASE - (5003 + CREATE_LEAD))
         self.assertIsNone(create.movement.frame)
+        match.tick = 5010  # a resend later stays ahead of the client
+        with patch("ow174.game.match.world.create", side_effect=self.capture):
+            self.assertEqual(create.build(0)[3]["frame_back"], world.CREATE_BASE - (5010 + CREATE_LEAD))
 
     def test_own_create_state_frame_lets_later_records_in(self):
         out = BitWriter()

@@ -62,8 +62,9 @@ dash's `STU_4773DA56` registration (`0D06` #138) and its child (#141) as on,
 as retail sends them, and gets its body's records from the charge on. While
 #138 is on, the original client draws the first-person view from the states it
 keeps of its body. Those take a record only when its frame is above the newest
-kept one, so the own body's create puts its state at the create's tick, not at
-the create path's default `0xFFFFFFFE`.
+kept one, so the own body's create puts its state 18 frames past the packet
+frame, not at the create path's default `0xFFFFFFFE`. At a frame the client had
+already predicted, it started its own body under the floor.
 
 ## Strict World queries
 

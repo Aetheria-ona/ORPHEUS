@@ -6,10 +6,25 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Own body spawn under the floor
+
+- Put the own body's create movement state 18 frames past the packet frame
+  (`match.CREATE_LEAD`), not at the create's tick. At the create's tick, a frame
+  the original client had already predicted, it started its own body under the
+  floor until a record corrected it (the first Rocket Punch for Doomfist).
+  Soldier: 76, which gets a record every frame, was corrected at once.
+- Live A/B run with the original client on the Practice Range, alternating per
+  spawn of each hero: the only spawn under the floor was a Doomfist spawn with
+  the create's tick. Both Doomfist spawns and the Soldier: 76 spawn with the
+  lead were on the floor, and their punches showed no flash at the start.
+- The prepared-runtime create test now expects the lead and checks that a
+  later resend stays ahead.
+
 #### Rocket Punch start flash
 
-- Put the own body's create movement state at the create's tick, not at the
-  create path's default `0xFFFFFFFE`. The original client keeps every body's
+- Put the own body's create movement state at a real frame (now 18 frames past
+  the packet frame; see above), not at the create path's default `0xFFFFFFFE`.
+  The original client keeps every body's
   movement states, its own one's too, and takes a record only when its frame is
   above the newest kept one, compared unsigned (client RVA `7CA7D3`..`7CA7E7`,
   before the record goes on to component 59). At `0xFFFFFFFE` the own body's
