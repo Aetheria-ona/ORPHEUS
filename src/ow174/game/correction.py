@@ -32,7 +32,10 @@ spring starts again from 0 while ours goes on (a few more corrections on stairs 
 Only for a body whose statescript the server runs (match.BODY_SCRIPT_HEROES): the mods it has on change the
 mover (Sprint), and a body whose abilities move it in ways the server does not know (Genji's double jump,
 Lucio's wall ride, Mercy's flight) would be pulled back by every record. Of those, only the heroes in HEROES:
-the ones whose movement the server's mover follows.
+the ones whose movement the server's mover follows. Any other body gets records in a window: McCree's
+server-only velocity changes (`force_impulse`), and while a mod of a server-only MovementMod state moves it
+(`server_motion`). The owner's client runs no server-only state, so it cannot predict that movement and
+follows it only from these records (Doomfist's Rocket Punch dash, 0D06 state 42).
 """
 
 from dataclasses import dataclass
@@ -46,6 +49,9 @@ CORRECTIONS = True  # False: the owner never gets its own body's state (each cli
 HEROES = {SOLDIER}  # the heroes whose movement abilities the mover follows
 ACK_LEAD = 2  # the client keeps the commands from ack - 1 on; a replay needs them from the record's frame + 1
 IMPULSE_WINDOW_US = 2_000_000  # cover the sandbox knockback and landing
+# Records after the last frame a server-only mod moved the body: the client needs one of them to take the end
+# of the movement, and the mod state's own end plug can still change it (Rocket Punch's jump, 0D06 #124).
+SERVER_MOTION_TAIL_US = 250_000
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,19 @@ def force_impulse(player, *, first_frame: int | None = None) -> None:
     through = first + (IMPULSE_WINDOW_US - 1) // player.quanta
     previous = getattr(player, 'impulse_correction', None)
     player.impulse_correction = (previous[0] if previous is not None else first, through)
+
+
+def server_motion(player, frame: int) -> None:
+    """Open or extend the record window after the statescript ran command frame `frame` with a server-only
+    movement mod on: it moves the body from the next frame (Mover.track_mods) through this one's tail."""
+    if not CORRECTIONS or player.body_script is None:
+        return
+    first = frame + 1
+    through = first + (SERVER_MOTION_TAIL_US - 1) // player.quanta
+    previous = getattr(player, 'impulse_correction', None)
+    if previous is not None:
+        first, through = previous[0], max(previous[1], through)
+    player.impulse_correction = (first, through)
 
 
 def _eligible(player) -> bool:

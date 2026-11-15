@@ -63,6 +63,7 @@ from functools import cache, cmp_to_key
 from ow174.game import contacts
 from ow174.game.collision import MOVER, NOT_GROUND, TEAM0, TEAM1, Ground, World, flat_world
 from ow174.game.commands import CROUCH, JUMP, SUBFRAME, Command
+from ow174.game.script.expr import Vec3
 from ow174.game.world import MAX_MOVEMENT_AXIS
 from ow174.paths import DATA_DIR
 
@@ -173,6 +174,7 @@ THROTTLE_FORWARD, THROTTLE_BACKWARD, THROTTLE_LATERAL = 17, 18, 19
 JUMP_INTENT, CROUCH_INTENT, COLLISION_MOD, LAND_LIMIT_MOD, STEP_DOWN_MOD = 20, 21, 22, 36, 38
 VELOCITY_MAGNITUDE, VELOCITY_HORIZONTAL, VELOCITY_Y, VELOCITY_JUMP_RATIO = range(32, 36)
 VELOCITY_WORLD_DELTA = -1  # internal index for an authored mode 1 vector
+MOVE_DIRECTION = -2  # internal index for an authored channel 2 vector: where forward throttle moves
 VelocityChange = tuple[int, int, int, float | tuple[float, float, float], float]
 FLT_MAX, FLT_MIN = 3.4028234663852886e38, 1.1754943508222875e-38
 # The statescript's MovementMod state (STU_316CFEF2) and its mod classes (STU_6810506D: m_A9561CA0 index,
@@ -185,6 +187,13 @@ MOD_OPS = {
     "STU_C61711C8": (MINIMUM, FLT_MAX),
     "STU_F197CFBF": (MAXIMUM, FLT_MIN),
 }
+# Its vector mod class (m_CFEC5F76 the channel, m_9B7A63EA a vec3). The client's type objects list each
+# scalar class before its vector form (add, multiply, set; min and max have none, RVA 3194D10 onward), so
+# STU_09F9B1FE sets. The mover reads channel 2 (`directed_throttles`); 1.74 authors that channel once, in
+# Rocket Punch's dash (0D06 state 42: the facing at release).
+VECTOR_MOD_OPS = {"STU_09F9B1FE": SET}
+DIRECTION_CHANNEL = 2
+DEFAULT_DIRECTION = (0.0, 1.0)  # (x, z) the client falls back to for a direction too short to normalise
 
 LAND_LIMIT = 0.004  # m/s: landing needs v.n below this (dword_7FF78B509D70)
 CROUCH_AGAIN = 0.15  # s after standing up before a held crouch button crouches again (0x7FF78B567978)
@@ -529,11 +538,56 @@ def modified_throttles(mods: list[Mod], right: float, forward: float) -> tuple[f
     return max(-1.0, min(1.0, lateral)), max(-1.0, min(1.0, f32(ahead - back)))
 
 
+def _throttle_length(right: float, forward: float) -> float:
+    """The throttles' length with the refined reciprocal square root (RVA 762A60)."""
+    squared = f32(f32(right * right) + f32(forward * forward))
+    if squared <= EPSILON:
+        return 0.0
+    estimate = contacts.rsqrt_estimate(squared)
+    return f32(squared * f32(f32(3.0 - f32(squared * f32(estimate * estimate))) * f32(estimate * 0.5)))
+
+
+def _angle(x: float, z: float) -> float:
+    return f32(math.atan2(x, z)) if x != 0.0 or z != 0.0 else 0.0
+
+
+def directed_throttles(mods: list[Mod], right: float, forward: float, axes) -> tuple[float, float]:
+    """RVA C33A85..C33D91: the channel 2 vector mods change the direction forward throttle moves in. They
+    act on the facing made flat and unit, in order; a changed direction (made flat and unit, (0, 0, 1)
+    when too short) turns the throttles by its angle to the facing, keeping their length."""
+    found = [mod for mod in mods if mod.index == MOVE_DIRECTION]
+    if not found:
+        return right, forward
+    fx, fz = flat_unit(f32(axes[0]), f32(axes[1])) or DEFAULT_DIRECTION
+    reference = (fx, 0.0, fz)
+    direction = reference
+    for mod in found:
+        if mod.op == ADD:
+            direction = tuple(f32(a + b) for a, b in zip(direction, mod.value, strict=True))
+        elif mod.op == MULTIPLY:
+            direction = tuple(f32(a * b) for a, b in zip(direction, mod.value, strict=True))
+        elif mod.op == SET:
+            direction = tuple(mod.value)
+    if direction == reference:
+        return right, forward
+    x, z = flat_unit(direction[0], direction[2]) or DEFAULT_DIRECTION
+    length = _throttle_length(right, forward)
+    angle = f32(_angle(right, forward) - f32(_angle(x, z) - _angle(fx, fz)))
+    return f32(f32(math.sin(angle)) * length), f32(f32(math.cos(angle)) * length)
+
+
 def _number(instance, cfg, default: float) -> float:
     if cfg is None:
         return default
     value = instance.evaluate(cfg)
     return f32(float(value)) if isinstance(value, (bool, int, float)) else default
+
+
+def _vector(instance, cfg) -> tuple[float, float, float] | None:
+    value = instance.evaluate(cfg) if cfg is not None else None
+    if not isinstance(value, Vec3) or not all(math.isfinite(axis) for axis in value):
+        return None
+    return tuple(f32(axis) for axis in value)
 
 
 def _mover_override(node) -> MoverData | None:
@@ -582,13 +636,22 @@ def statescript_mover_data(component) -> MoverData | None:
 def statescript_mods(component) -> dict:
     """The movement mods of a body's statescript (a script.runtime.Component) that are on now:
     {(instance, state, slot): (index, op, value, priority)}. The client gives the mover each mod of a
-    MovementMod state while it is on (0x7FF789C49590 begin, 0x7FF789C4C1E0 tick, 0x7FF789C499C0 end)."""
+    MovementMod state while it is on (0x7FF789C49590 begin, 0x7FF789C4C1E0 tick, 0x7FF789C499C0 end). A
+    direction mod's index is MOVE_DIRECTION and its value a vec3."""
     found = {}
     for instance in component.instances.values():
         for state in instance.states.values():
             if not state.active or state.node.cls != MOVEMENT_MOD:
                 continue
             for slot, mod in enumerate(state.node.fields.get("m_BC5E91CF") or ()):
+                if isinstance(mod, dict) and mod.get("$") in VECTOR_MOD_OPS:
+                    value = _vector(instance, mod.get("m_9B7A63EA"))
+                    if mod.get("m_CFEC5F76") == DIRECTION_CHANNEL and value is not None:
+                        priority = _number(instance, mod.get("m_priority"), 0.0)
+                        found[(instance.id, state.index, slot)] = (
+                            MOVE_DIRECTION, VECTOR_MOD_OPS[mod["$"]], value, priority,
+                        )
+                    continue
                 kind = MOD_OPS.get(mod.get("$")) if isinstance(mod, dict) else None
                 if kind is None or mod.get("m_A9561CA0") is None:
                     continue
@@ -597,6 +660,18 @@ def statescript_mods(component) -> dict:
                 priority = _number(instance, mod.get("m_priority"), 0.0)
                 found[(instance.id, state.index, slot)] = (int(mod["m_A9561CA0"]), op, value, priority)
     return found
+
+
+def server_only_mods(component, active: dict) -> bool:
+    """Whether a mod of `statescript_mods` comes from a server-only MovementMod state. The owner's client runs
+    no server-only state, so its prediction lacks that movement (1.74 has three, all in Rocket Punch: 0D06
+    states 42, 44 and 74)."""
+    for instance_id, state_index, _slot in active:
+        instance = component.instances.get(instance_id)
+        state = instance.states.get(state_index) if instance is not None else None
+        if state is not None and state.node.server_only:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -889,14 +964,14 @@ class Mover:
             self.input_tick = tick
             self.input_frame = frame
 
-        right, forward = modified_throttles(active, right, forward)
+        angle = self.yaw * TURN
+        axes = (math.sin(angle), math.cos(angle))  # forward (x, z); right is (-cos, sin)
+        right, forward = directed_throttles(active, *modified_throttles(active, right, forward), axes)
         outcome = None
         if move_to is None:
             normal = ground.normal if grounded and ground is not None else (0.0, 1.0, 0.0)
             vx, vy, vz = self.velocity
             horizontal = (vx, 0.0, vz)
-            angle = self.yaw * TURN
-            axes = (math.sin(angle), math.cos(angle))  # forward (x, z); right is (-cos, sin)
             self._friction(dt, horizontal, vy, grounded)
             self._accelerate(dt, right, forward, axes, grounded)
             self._cap(horizontal, axes)

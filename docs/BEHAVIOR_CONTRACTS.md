@@ -48,6 +48,18 @@ the acknowledgement that retires the event. The prepared Seismic Slam test
 runs both landing effects through the body streams. Original-client rendering,
 audio and prediction recovery remain pending.
 
+## Server-only movement
+
+The [server-only movement fixture](../fixtures/behavior/server-only-movement-v1.json)
+checks how the channel 2 direction mod turns the throttles in six synthetic
+cases. It also checks the owner's record window around a server-only movement
+mod: records from the first moved frame through a 250 ms tail. It pins the
+104319 Rocket Punch dash (`0D06` state 42) and the client's throttle function.
+The [prepared-runtime regression](../tests/runtime/test_doomfist_rocket_punch.py)
+runs Rocket Punch with real command input for minimum and full charge, a
+turning view, cancellation and a wall. Original-client presentation of the
+dash remains pending: the view drops below the floor while it runs.
+
 ## Strict World queries
 
 The [World query fixture](../fixtures/behavior/world-queries-v1.json) records eleven synthetic cases: known origin and position, known unset, missing and populated foreign variables, unavailable position and foreign-variable services, and a null entity member read. Its pinned Python source establishes the strict host's query policy. It is not original-client evidence.
