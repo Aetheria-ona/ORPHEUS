@@ -23,6 +23,12 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Add a public test for the withheld states and a prepared-runtime check that
   the owner's frames leave out #138 and #141 for the whole dash while the
   server keeps them on.
+- Original client with this change, full charge and minimum charge: the view
+  stays on the body and the dash can be seen. Still open: a brief flash below
+  the spawn area right at the start of the dash (likely the client predicting
+  #138 until the next server frame) and the gauntlet sitting slightly left
+  during the dash. Passed Ruff, 943 public Python tests, both Node suites and
+  the five Rocket Punch runtime tests.
 
 #### Rocket Punch dash
 
