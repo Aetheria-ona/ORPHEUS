@@ -67,16 +67,24 @@ class StackSentValueTests(unittest.TestCase):
         self.assertAlmostEqual(expr.to_float(value), 0.3, places=6)
         self.assertEqual([item.state for item in bindings], [1])
 
-    def test_constant_stack_is_left_to_the_client(self):
+    def test_replacing_stack_keeps_the_resolved_value(self):
         component, instance = body(stack(0, {"$": "STUConfigVarFloat", "m_value": 0.4}))
         component.set(23184, 0.1)
         instance.state(0).begin()
         var, (value, bindings) = sent(component)
-        self.assertAlmostEqual(expr.to_float(var.value()), 0.4, places=6)
-        self.assertAlmostEqual(expr.to_float(value), 0.1, places=6)  # the client's copy replaces it
+        self.assertAlmostEqual(expr.to_float(value), 0.4, places=6)
         self.assertEqual(len(bindings), 1)
         instance.state(0).end(False)
         self.assertAlmostEqual(expr.to_float(sent_value(var)), 0.1, places=6)
+
+    def test_replacing_stack_under_a_slow_is_sent_in_the_value(self):
+        component, instance = body(stack(0, {"$": "STUConfigVarFloat", "m_value": 0.2}), stack(1, adds(0.5)))
+        instance.state(0).begin()
+        instance.state(1).begin()
+        var, (value, bindings) = sent(component)
+        self.assertAlmostEqual(expr.to_float(var.value()), 0.7, places=6)
+        self.assertAlmostEqual(expr.to_float(value), 0.2, places=6)
+        self.assertEqual(len(bindings), 2)
 
     def test_unbound_variable_sends_its_value(self):
         component, _ = body()

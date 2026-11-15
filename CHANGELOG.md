@@ -8,18 +8,26 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 #### Owner slows while charging
 
-- Send a variable bound to Stack entries with the value below the lowest
-  bound Stack, not the resolved value. The client stores the sent value as
-  the variable's base and evaluates each bound Stack over it with its own
-  copy of the state (client RVAs A0D2C0, 1BA78A0, 1BA70B0). The owner slow
-  Stacks all read their own variable (`#23184 + x`), so the slow was added
-  twice: Rocket Punch's charge (`0D06` state 77, 0.5) became 1.0 and
-  Doomfist could not walk while charging. In build 104319, 15 owner slow
-  Stacks have this form, among them Reaper's, Reinhardt's, Mercy's,
-  Roadhog's, Cassidy's, Brigitte's and Sigma's. Bindings that are not
-  Stacks (message receivers, ability pushes) still send the resolved value.
+- When a bound Stack's value reads its own variable, send the variable with
+  the value below the lowest such Stack, not the resolved value. The client
+  stores the sent value as the variable's base and evaluates each bound
+  Stack over it with its own copy of the state (client RVAs A0D2C0,
+  1BA78A0, 1BA70B0). The owner slow Stacks all have the form
+  `#23184 + x`, so the slow was added twice: Rocket Punch's charge (`0D06`
+  state 77, 0.5) became 1.0 and Doomfist could not walk while charging. In
+  build 104319, 15 owner slow Stacks have this form, among them Reaper's,
+  Reinhardt's, Mercy's, Roadhog's, Cassidy's, Brigitte's and Sigma's.
+  Stacks that replace the value, message receivers and ability pushes still
+  send the resolved value.
 - Add unit tests for the sent value and a prepared 104319 regression for
   the charge slow's snapshot.
+- Passed Ruff, the public Python and dashboard tests and `git diff --check`.
+  The prepared runtime suite fails the same modules as on `6bb305e9`, from
+  missing local data.
+- Original client on the Practice Range: Doomfist walks while charging, at
+  2.7 to 2.8 m/s on the server (half the 5.5 m/s walk) with no
+  corrections. A minimum punch still dashes about 6.5 m and a full one about
+  20 m.
 
 #### Rocket Punch dash
 

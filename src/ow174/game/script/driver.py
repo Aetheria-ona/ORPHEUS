@@ -1132,13 +1132,32 @@ def sent_links(var: runtime.Var) -> list[runtime.Link]:
 def sent_value(var: runtime.Var, links: list[runtime.Link] | None = None):
     """The value to send with the variable's bindings. The client stores it as the variable's base and
     resolves the bindings over it with its own copies of the bound states (read 0x7FF78991D2C0, store
-    0x7FF78AAB78A0, resolve 0x7FF78AAB70B0). A Stack evaluates its value over the value below its entry,
-    as in an owner slow `#23184 + 0.5`, so a resolved base would be added twice: the base is the value
-    below the lowest bound Stack. Bindings that do not read below (message receivers, ability pushes)
-    keep the resolved value."""
+    0x7FF78AAB78A0, resolve 0x7FF78AAB70B0). A Stack whose value reads its own variable, as in an owner
+    slow `#23184 + 0.5`, would add again to a resolved base, so the base is the value below the lowest
+    such Stack. Every other binding replaces the base on the client, and the resolved value stays."""
     links = sent_links(var) if links is None else links
-    below = next((link.state for link in links if link.state.reads_below(var)), None)
+    below = next((link.state for link in links if _adds_to_own_output(link.state, var)), None)
     return var.value() if below is None else var.value(below=below)
+
+
+def _adds_to_own_output(state: runtime.State, var: runtime.Var) -> bool:
+    """A bound Stack whose value expression reads the variable it outputs to."""
+    if not state.reads_below(var):
+        return False
+    target = state.node.field("m_out_Var")
+    if not isinstance(target, dict):
+        return False
+    return _reads_dynamic(state.node.field("m_value"), target.get("m_identifier"), target.get("m_60DB8F99"))
+
+
+def _reads_dynamic(cfg, identifier, scope) -> bool:
+    if isinstance(cfg, dict):
+        if cfg.get("$") == "STUConfigVarDynamic":
+            return cfg.get("m_identifier") == identifier and cfg.get("m_60DB8F99") == scope
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg.values())
+    if isinstance(cfg, list):
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg)
+    return False
 
 
 def _same_var(a, b) -> bool:
