@@ -15,6 +15,7 @@ PUNCH = 0x0D06
 DASH, DASH_MOD = 10, 76  # node positions: the dash's Wait and its server-only MovementMod
 SPEED = 45.0  # m/s: the dash's top speed with the prepared 104319 runtime
 TURN = 364  # yaw units per frame turned during the dash, about 2 degrees
+SLOW, CHARGE_SLOW = 23184, 77  # the owner's movement slow (entity var) and the charge's Stack on it (state)
 
 
 class RocketPunchTests(unittest.TestCase):
@@ -84,6 +85,21 @@ class RocketPunchTests(unittest.TestCase):
         self.assertEqual((travel, dashed, records), ([0.0, 0.0, 0.0], [], []))
         self.assertFalse(self.state(punch, DASH).counter)
         self.assertFalse(self.state(punch, DASH_MOD).counter)
+
+    def test_the_charge_slow_reaches_the_client_once(self):
+        """State 77 is `#23184 + 0.5`, the owner's slow. The client adds it over the value it gets, so it
+        gets the value below the entry: the resolved 0.5 became 1.0 there, a full stop."""
+        player, punch = self.spawn(flat_world(1.0))
+        start = list(player.mover.position)
+        for _ in range(30):
+            self.frame += 1
+            self.harness.command(player, self.frame, buttons=SECONDARY, forward=127)
+        slow = player.body_script.component.entity_var(SLOW)
+        self.assertAlmostEqual(slow.value(), 0.5, places=6)
+        value, bindings = player.body_script.snapshot().vars[(0, SLOW)]
+        self.assertIsNone(value)
+        self.assertEqual([(item.instance, item.state) for item in bindings], [(punch.id, CHARGE_SLOW)])
+        self.assertGreater(math.dist(start, player.mover.position), 0.5)  # the server walks it, slowed
 
     def test_a_wall_stops_the_dash(self):
         player, punch = self.spawn(World(FLOOR + wall(-5.0, 4.0, 5.0, 4.0, 1.0, 4.0)))

@@ -6,6 +6,21 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Owner slows while charging
+
+- Send a variable bound to Stack entries with the value below the lowest
+  bound Stack, not the resolved value. The client stores the sent value as
+  the variable's base and evaluates each bound Stack over it with its own
+  copy of the state (client RVAs A0D2C0, 1BA78A0, 1BA70B0). The owner slow
+  Stacks all read their own variable (`#23184 + x`), so the slow was added
+  twice: Rocket Punch's charge (`0D06` state 77, 0.5) became 1.0 and
+  Doomfist could not walk while charging. In build 104319, 15 owner slow
+  Stacks have this form, among them Reaper's, Reinhardt's, Mercy's,
+  Roadhog's, Cassidy's, Brigitte's and Sigma's. Bindings that are not
+  Stacks (message receivers, ability pushes) still send the resolved value.
+- Add unit tests for the sent value and a prepared 104319 regression for
+  the charge slow's snapshot.
+
 #### Rocket Punch dash
 
 - Send the owner its body's movement records while a mod of a server-only
