@@ -6,6 +6,12 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Linux compatibility for the Python reference server and public tests
+
+- Deferred `ctypes.WinDLL("iphlpapi")` and `ctypes.WinDLL("kernel32")` loading in `ow174.launcher.connections` and `ow174.launcher.inject` behind `sys.platform == "win32"` lazy helpers so importing `ow174.cli` or running `--mode server` works on Linux.
+- Returned `None` from `connection_owner` on non-Windows platforms and skipped the Windows-only `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy` hook test outside `win32`.
+- Passed Ruff, 920 public Python tests (`1` skipped: `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy`), `ow174 --mode server` missing-runtime check without a prepared pack, and `tests.runtime.test_lobby_smoke` against a prepared runtime on Arch Linux (Python 3.14.8).
+
 #### Profile settings normalization and shared contract
 
 - Normalized `profile.settings["+0x130"]` compound keys (`+0x8`) as signed 32-bit integers and preserved 64-bit `+0x0` values in `Profile.from_dict` and `save_values` (22204), rejecting out-of-range or boolean values.
