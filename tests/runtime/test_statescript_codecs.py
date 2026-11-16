@@ -25,6 +25,7 @@ SPRAY_FIELDS = {
 SAMPLES = {
     "861D9015": [{}, SPRAY_PAYLOAD, {**SPRAY_PAYLOAD, "entity": 0xA0000101, "extra": 70000, "g": True}],
     "none": [{}],
+    "none+u8": [{"m_B4802CE3": value} for value in (0, 1, 255)],
     "switch": [{"current": True}, {"current": False}],
     "stack": [{"top": True, "under": False}, {"top": False, "under": True}],
     "button": [{"counter": 0}, {"counter": 13}, {"counter": 21}],
@@ -32,6 +33,7 @@ SAMPLES = {
         {"start": FRAME_TIME - 160, "counter": 5},
         {"start": FRAME_TIME + 3, "offset": -7, "subindex": 2, "volleys": 3, "counter": 70},
     ],
+    "start": [{"start": FRAME_TIME - 32}, {"start": FRAME_TIME + 8}],
     "anim": [{"counter": 6}, {"counter": 9}],
     "chase": [
         {"cur": 1.5, "reached": False, "remaining": None, "last": None},
@@ -46,6 +48,10 @@ SAMPLES = {
     "targets": [
         {},
         {"targets": tuple((0xA0000101 + i, age) for i, age in enumerate((0, 255, 256, 65535, 65536)))},
+    ],
+    "shockwave": [
+        {},
+        {"has_list": 1, "n": 1, "items": [{"a": 300, "b": 0xBEEF, "c": 0xA0000101}], "f": 0.5},
     ],
     "subscript": [{"child": 13}, {"child": 300}],
     "message": [{"stacked": True}, {"stacked": False}],
@@ -72,6 +78,8 @@ def expected(kind: str, payload: dict) -> dict:
             return {**SPRAY_FIELDS, "has_entity": 1, "entity": payload["entity"],
                     "has_extra": 1, "extra": payload["extra"], "g": 1}
         return SPRAY_FIELDS
+    if kind == "start":
+        return {"start": payload["start"]}
     if kind == "switch":
         return {"current": get("current", False)}
     if kind == "two_bits":
@@ -102,6 +110,10 @@ def expected(kind: str, payload: dict) -> dict:
         return out
     if kind == "targets":
         return {"targets": get("targets", ())}
+    if kind == "shockwave":
+        return payload or {"has_list": 0}
+    if kind == "none+u8":
+        return payload
     if kind == "subscript":
         return {"child": get("child", 0)}
     if kind == "message":
@@ -209,6 +221,32 @@ class EncoderTests(unittest.TestCase):
                 self.assertEqual(got, expected(kind, payload), (cls, payload))
                 checked[kind] += 1
         self.assertEqual(set(checked), set(statescript.WRITERS))
+
+    def test_air_target_selector_remote_payload_is_one_byte(self):
+        cls = "STU_4C96470A"
+        for full in (False, True):
+            for payload in SAMPLES["none+u8"]:
+                with self.subTest(full=full, payload=payload):
+                    out = BitWriter()
+                    statescript.write_remote_payload(out, cls, payload, full)
+                    reader = BitReader(out.getvalue())
+                    got = decode.read_payload(reader, cls, FRAME_TIME, FRAME_MS, owner=False, full=full)
+                    self.assertEqual(got, payload)
+                    self.assertEqual((reader.pos, out.count), (8, 8))
+
+    def test_shockwave_remote_payload_reads_both_list_branches(self):
+        cls = "STUStatescriptStateShockwave"
+        for full in (False, True):
+            for payload in SAMPLES["shockwave"]:
+                with self.subTest(full=full, payload=payload):
+                    out = BitWriter()
+                    statescript.write_remote_payload(out, cls, payload, full)
+                    reader = BitReader(out.getvalue())
+                    got = decode.read_payload(reader, cls, FRAME_TIME, FRAME_MS, owner=False, full=full)
+                    self.assertEqual(got, expected("shockwave", payload))
+                    self.assertEqual(reader.pos, out.count)
+                    if not payload:
+                        self.assertEqual(out.count, 1)
 
     def test_delayed_switch_remote_payload_keeps_all_three_branches(self):
         cls = "STU_B591EBFE"

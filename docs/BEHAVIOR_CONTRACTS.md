@@ -16,6 +16,56 @@ python -B -m unittest tests.public.test_behavior_contracts
 
 Normal public test discovery also runs this contract. For cross-language checks, set `ORPHEUS_BEHAVIOR_FIXTURES` to the other checkout's `fixtures/behavior` directory so both consumers read the same file. Without that setting, the test uses this repository's fixtures. Record the exact Python and Rust revisions used for a comparison.
 
+## Seismic Slam lifecycle
+
+The [synthetic wave fixture](../fixtures/behavior/seismic-slam-wave-v1.json) checks
+that the immediate wave starts at zero reach, deduplicates candidate bodies,
+and gives its child state the full-range result before finishing. It pins the
+server VM baseline and the build 104319 graph and callback references. The
+Python test runs the state through the normal VM entry points.
+
+The [prepared-runtime regression](../tests/runtime/test_doomfist_slam.py)
+uses real command input and the locally prepared 104319 graph. It checks
+damage through the forward sector, static walls and ground gaps, and overlap
+with the close impact. Run it with the prepared runtime described in
+[CONTRIBUTING.md](../CONTRIBUTING.md#prepared-runtime-checks). The fixture
+covers lifecycle. Exact ground contacts, displacement, presentation and
+original-client acceptance need separate observations.
+
+The [airborne placement fixture](../fixtures/behavior/seismic-slam-placement-v1.json)
+checks an idle selector, a miss retaining its prior point, and a success that
+publishes the destination before MoveTo starts. The prepared runtime test
+walks off a ledge and presses E with the original graph. It covers travel to
+the lower floor, the impact hit, and cancellation over empty space. Client
+targeting preview and dynamic filters remain pending.
+
+## Body short actions
+
+The [short-action retry fixture](../fixtures/behavior/body-short-action-retry-v1.json)
+checks the owner and observer encodings using different authored index widths.
+It pins the frame bytes, the original action stamp across loss and retry, and
+the acknowledgement that retires the event. The prepared Seismic Slam test
+runs both landing effects through the body streams. Original-client rendering,
+audio and prediction recovery remain pending.
+
+## Server-only movement
+
+The [server-only movement fixture](../fixtures/behavior/server-only-movement-v1.json)
+checks how the channel 2 direction mod turns the throttles in six synthetic
+cases. It also checks the owner's record window around a server-only movement
+mod: records from the first moved frame through a 250 ms tail. It pins the
+104319 Rocket Punch dash (`0D06` state 42) and the client's throttle function.
+The [prepared-runtime regression](../tests/runtime/test_doomfist_rocket_punch.py)
+runs Rocket Punch with real command input for minimum and full charge, a
+turning view, cancellation and a wall. It also checks that the owner sees the
+dash's `STU_4773DA56` registration (`0D06` #138) and its child (#141) as on,
+as retail sends them, and gets its body's records from the charge on. While
+#138 is on, the original client draws the first-person view from the states it
+keeps of its body. Those take a record only when its frame is above the newest
+kept one, so the own body's create puts its state 18 frames past the packet
+frame, not at the create path's default `0xFFFFFFFE`. At a frame the client had
+already predicted, it started its own body under the floor.
+
 ## Strict World queries
 
 The [World query fixture](../fixtures/behavior/world-queries-v1.json) records eleven synthetic cases: known origin and position, known unset, missing and populated foreign variables, unavailable position and foreign-variable services, and a null entity member read. Its pinned Python source establishes the strict host's query policy. It is not original-client evidence.

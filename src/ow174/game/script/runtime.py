@@ -311,9 +311,11 @@ class InstanceContext(Context):
     def native(self, cfg: dict):
         """A native config's scalar +20 interface and compatibility polling."""
         cls = cfg.get("$")
-        if cls == "STU_A6B80C63":
+        if cls in ("STU_A6B80C63", "STU_951CAB4C"):
             from ow174.game.script import play
 
+            if cls == play.RANKED_ARRAY:
+                return play.rank_array(self.instance, cfg, watcher=self.watcher, scalar=True)
             return play.fold_array(self.instance, cfg, watcher=self.watcher)
         if cls in ("STU_7042F028", "STU_45B0D2B2"):
             from ow174.game.script import play
@@ -391,6 +393,13 @@ class RaycastResult:
     normal: expr.Vec3 | None
 
 
+@dataclass(frozen=True)
+class TrackedBodySamples:
+    """Target IDs and capsule distances from one supported sphere query."""
+
+    rows: tuple[tuple[int, float], ...]
+
+
 class World:
     """What the runtime asks outside its entity: the owner's hero and mode (for ruleset defaults), other
     entities, config vars the server cannot compute, and game messages to other entities. The base
@@ -411,6 +420,9 @@ class World:
 
     def raycast_provider(self, instance: "Instance", node: Node):
         return self.raycast
+
+    def select_landing(self, state: "State"):
+        return NotImplemented
 
     def physics_explosion(self, state: "State"):
         return NotImplemented
@@ -457,8 +469,15 @@ class World:
     def nearby_enemy_count(self, owner: int, radius: float) -> int:
         return 0
 
-    def set_temporary_shield(self, owner: int, pool_id: int, amount: float) -> None:
+    def set_temporary_shield(
+        self, owner: int, pool_id: int, amount: float, *, contributor: tuple[int, int] | None = None,
+    ) -> None:
         pass
+
+    def temporary_shield_current(
+        self, owner: int, pool_id: int, *, contributor: tuple[int, int] | None = None,
+    ) -> float | None:
+        return None
 
     def ai_weapon_button(self, slot: int) -> int | None:
         return None
@@ -467,6 +486,10 @@ class World:
         return NotImplemented
 
     def tracked_targets(self, state: "State"):
+        return NotImplemented
+
+    def shockwave_targets(self, state: "State", reach: float):
+        """Body identifiers eligible for this sample, or NotImplemented for an unsupported query."""
         return NotImplemented
 
     def static_target_tag(self, tag: int):
@@ -696,7 +719,7 @@ class World:
         """None: known absent compiled filter; bool: known predicate result."""
         return NotImplemented
 
-    def replicate_wheel_event(self, instance: "Instance", node: Node) -> None:
+    def replicate_frame_action(self, instance: "Instance", node: Node) -> None:
         pass
 
     def message_state_context(self, entity: int, *, component: "Component | None" = None):
@@ -716,6 +739,10 @@ class World:
 
     def finish_wheel_emote(self, instance: "Instance", node: Node):
         return NotImplemented
+
+    def retires_stopped_play(self, instance: "Instance") -> bool:
+        """Whether the world removes this root when it explicitly stops."""
+        return False
 
     def play_script(self, instance: "Instance", node: Node) -> None:
         """Select a native PlayScript resource, then ask the world to route it."""
@@ -805,7 +832,7 @@ class Component:
         self.destroyed: list[Instance] = []
         # Volley state, shot number, time, and the frozen activation counter and start.
         self.shots: list[tuple[State, int, int, tuple[int, int]]] = []
-        self.damage_reports: list[tuple[State, int, tuple[int, ...], float, int, tuple[int, ...]]] = []
+        self.damage_reports: list[tuple[State, int | None, tuple[int, ...], float, int, tuple[int, ...]]] = []
         self.owner_dead = False  # the body's health is 0 (combat.py): presses and shots stop
         self.fault: ScriptBudgetError | UnsupportedScriptError | None = None
         self._operation_depth = 0
@@ -1544,6 +1571,14 @@ class Instance:
             self.write((scope, identifier), value)
         elif event.kind == STOP:
             self.stop()
+            # Native entity instances are pruned after explicit STOP even with lifetime byte 1.
+            if (
+                self.stopped
+                and self.parent is None
+                and self.component.instances.get(self.id) is self
+                and self.component.world.retires_stopped_play(self)
+            ):
+                self.component.destroy(self)
         elif event.kind == BUTTON:
             self.button_edge(event.button, event.pressed)
         elif event.kind == MESSAGE:
@@ -1575,9 +1610,8 @@ class Instance:
                     continue
                 for index in condition.field("m_122DF0CA") or ():
                     state = self.states.get(index)
-                    if state is not None and state.active and not state.flags_check:
-                        state.flags_check = True
-                        self.post(Event(component.now, 0, CHECK, state=state))
+                    if state is not None:
+                        state.request_check()
 
     def run_deferred(self) -> bool:
         """The deferred list (Defer), from the last entry down. Returns whether something ran."""
@@ -1644,9 +1678,8 @@ class Instance:
             for index in indexes:
                 self.component.consume_work("join completion check")
                 state = self.states.get(index)
-                if state is not None and state.active and state is not caller and not state.flags_check:
-                    state.flags_check = True
-                    self.post(Event(self.component.now, 0, CHECK, state=state))
+                if state is not None and state is not caller:
+                    state.request_check()
             return False
         if previous != expr.to_int(node.field("m_B24D1794")) - 1:
             return False
@@ -1778,6 +1811,12 @@ class State:
 
     def request_finish(self, delay: int = 0) -> None:
         self.request(FINISH, delay)
+
+    def request_check(self) -> None:
+        """1B71220: coalesce a pending transition check for an active state."""
+        if self.active and not self.flags_check:
+            self.flags_check = True
+            self.instance.post(Event(self.now, 0, CHECK, state=self))
 
     def timer_at(self, delay: int, param: int = 1, transient: bool = False) -> None:
         self.instance.post(Event(self.now + delay, 0, TIMER, state=self, param=param, transient=transient))

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from types import NotImplementedType
 from typing import TYPE_CHECKING, ClassVar
 
+from ow174.game.commands import FRAME_HALF, FRAME_MASK
 from ow174.game.content import JUNKENSTEIN_MODES
 from ow174.game.mover import (
     ADD,
@@ -73,6 +74,7 @@ from ow174.game.script.runtime import (
     RaycastRequest,
     RaycastResult,
     State,
+    TrackedBodySamples,
     Var,
     handler,
     send_message,
@@ -749,7 +751,11 @@ class NumericPropertyModifiers(State):
             self.ticks()
 
     def dependency_changed(self):
-        self.publish()
+        if self.instance.component.strict:
+            self.publish()
+        else:
+            # Legacy mode only watches transition operands for this state.
+            self.request_check()
 
     def tick(self):
         self.publish()
@@ -1907,6 +1913,20 @@ class Wait(State):
             self.request_finish()
 
 
+@state_class("STU_54FEB21C")
+class TimedGraphState(State):
+    """Use the 104319 priority-1 timer finish for the unguarded Slam impact state."""
+
+    def on_enter(self) -> None:
+        if (self.instance.graph.index, self.node.pos) == (0x0B27, 87):
+            duration = self.evaluate(_field(self, "m_ED97A97C"), watch=False)
+            self.timer_at(max(0, seconds_to_ms(duration)), 1)
+
+    def timer(self, param: int) -> None:
+        if param == 1 and (self.instance.graph.index, self.node.pos) == (0x0B27, 87):
+            self.request_finish()
+
+
 @state_class("STU_E3CEF6B9")
 class WaitForServerFrames(State):
     """Finishes after its number of server frames (unverified: one frame = one command frame)."""
@@ -2185,6 +2205,7 @@ class WeaponVolley(State):
         self.volleys = 0  # the volley counter (the record's low byte); 1 after the first StartFiring
         self.per_shot = 1
         self.ammo0 = 0
+        self.ammo_sample: int | None = None
         self.rate = 1.0
         self.spread0 = 0.0
         self.spread_ramp: float | None = None
@@ -2235,8 +2256,10 @@ class WeaponVolley(State):
                 and launch.get("m_23C72C36") is None):
             cfg = launch.get("m_AC20B1C1")
             self.spread_ramp = f32(to_float(self.evaluate(cfg, watch=False))) if cfg else 0.0
-        self.spread = self.spread_at(self.now - self.start - self.offset)
-        if spread is not None and self.spread_ramp is not None and self.spread < 1.0:
+        elapsed = self.now - self.start - self.offset
+        self.ammo_sample = self.ammo_at(elapsed) if ammo is not None and self.per_shot > 0 else None
+        self.spread = self.spread_at(elapsed)
+        if self.ammo_sample or (spread is not None and self.spread_ramp is not None and self.spread < 1.0):
             self.ticks()
         self.links = []
         for slot, (name, value) in enumerate(
@@ -2291,16 +2314,24 @@ class WeaponVolley(State):
         return self.spread
 
     def tick(self) -> None:
-        spread = self.spread_at(self.now - self.start - self.offset)
-        if spread == self.spread:
-            return
-        # Expressions watching the linked variable need an ordinary change event.
-        var = self._out("m_3FFC9EB9")
-        if var is not None:
-            before = var.value()
-            self.spread = spread
-            self.instance.changed(var, before)
-        if spread >= 1.0:
+        elapsed = self.now - self.start - self.offset
+        if self.ammo_sample:
+            ammo = self.ammo_at(elapsed)
+            if ammo != self.ammo_sample:
+                ammo_var = self._out("m_24E351A4")
+                if ammo_var is not None and ammo_var.links:
+                    link = ammo_var.links[-1]
+                    if link.state is self and link.slot == 0:
+                        self.instance.changed(ammo_var, self.ammo_sample)
+                self.ammo_sample = ammo
+        spread_var = self._out("m_3FFC9EB9") if self.spread_ramp is not None and self.spread < 1.0 else None
+        if spread_var is not None:
+            spread = self.spread_at(elapsed)
+            if spread != self.spread:
+                before = spread_var.value()
+                self.spread = spread
+                self.instance.changed(spread_var, before)
+        if not self.ammo_sample and (spread_var is None or self.spread >= 1.0):
             self.instance.ticking.remove(self)
 
     def spread_at(self, elapsed: int) -> float:
@@ -2325,9 +2356,14 @@ class WeaponVolley(State):
             link = next((item for item in var.links if item.state is self), None)
             if link is not None:
                 before = var.value()
+                if link.slot == 0 and var.links[-1] is link and self.ammo_sample is not None:
+                    # The computed link may already read zero before the final shot timer
+                    # removes it. Its watchers still need the last observed ammo change.
+                    before = self.ammo_sample
                 var.base = values.get(link.slot)
                 self.unlink(var)
                 self.instance.changed(var, before)
+        self.ammo_sample = None
         self.spread = values[2]
         self.links = []
 
@@ -2410,10 +2446,15 @@ class MoveTo(State):
 
     def on_begin(self) -> None:
         speed_config = _field(self, "m_speed")
-        unsupported = ("m_destinationEntity", "m_destinationBone", "m_5BEFF040")
+        unsupported = ("m_destinationBone", "m_5BEFF040")
         if _field(self, "m_B060F688") != 0 or speed_config is None or any(
             _field(self, field) is not None for field in unsupported
         ):
+            return
+        entity_config = _field(self, "m_destinationEntity")
+        # A selector can explicitly supply the invalid entity to name a world point.
+        if (entity_config is not None
+                and self.evaluate(entity_config, watch=False) != Entity(expr.INVALID_ENTITY)):
             return
         destination = self.evaluate(_field(self, "m_865F3D01"), watch=False)
         speed = self.evaluate(speed_config, watch=False)
@@ -2857,8 +2898,15 @@ class Switch(State):
 
     def pick(self) -> str:
         value = self.evaluate(_field(self, "m_262AE982"))
-        for number, case in enumerate(_field(self, "m_05706D1C") or []):
-            if isinstance(case, dict) and equal(value, self.evaluate(case.get("m_value"), watch=False)):
+        cases = _field(self, "m_05706D1C") or []
+        indexed = _field(self, "m_F0F0720B") == 1
+        # 104319 1B9B531 supplies the row index for an omitted value in indexed mode.
+        for number, case in enumerate(cases[:64]):
+            if not isinstance(case, dict):
+                continue
+            config = case.get("m_value")
+            match = number if indexed and config is None else self.evaluate(config, watch=False)
+            if equal(value, match):
                 return f"m_05706D1C[{number}]"
         return "m_A5EF385D"
 
@@ -3228,19 +3276,43 @@ class HealthPool(State):
         key = guid(identifier.get("m_identifier"))
         return key & 0xFFFFFFFF if key is not None else None
 
+    def _contributor(self) -> tuple[int, int] | None:
+        if self.instance.auto_retire and self.instance.parent is None:
+            return self.instance.id, self.index
+        return None
+
     def on_enter(self) -> None:
         pool_id = self._shield_id()
         if pool_id is not None:
             amount = to_float(self.evaluate(_field(self, "m_amount"), watch=False))
+            contributor = self._contributor()
             if math.isfinite(amount) and amount > 0.0:
                 component = self.instance.component
-                component.world.set_temporary_shield(component.entity, pool_id, amount)
+                component.world.set_temporary_shield(
+                    component.entity, pool_id, amount, contributor=contributor,
+                )
+            if contributor is not None:
+                self.ticks()
+                self.tick()
+
+    def tick(self) -> None:
+        component = self.instance.component
+        pool_id = self._shield_id()
+        if pool_id is None:
+            return
+        remaining = component.world.temporary_shield_current(
+            component.entity, pool_id, contributor=self._contributor(),
+        )
+        if remaining is not None and remaining <= 0.0:
+            self.request_finish()
 
     def on_end(self, finished: bool) -> None:
         pool_id = self._shield_id()
         if pool_id is not None:
             component = self.instance.component
-            component.world.set_temporary_shield(component.entity, pool_id, 0.0)
+            component.world.set_temporary_shield(
+                component.entity, pool_id, 0.0, contributor=self._contributor(),
+            )
 
 @state_class("STUStatescriptStateModifyHealth")
 class ModifyHealth(State):
@@ -3293,6 +3365,7 @@ class TrackTargets(State):
         self.count_var: Var | None = None
         self.targets = ()
         self.managed = False
+        self.checked_frame: int | None = None
 
     def on_enter(self) -> None:
         fields = self.node.fields
@@ -3306,7 +3379,9 @@ class TrackTargets(State):
             self.count_var = self.link(target)
             return
         self.refresh()
-        if self.managed:
+        if self.managed and not self.impact_sphere():
+            if self.hostile_body_profile() is not None:
+                self.checked_frame = self.instance.component.frame & FRAME_MASK
             self.ticks()
 
     def refresh(self) -> None:
@@ -3314,14 +3389,72 @@ class TrackTargets(State):
         if values is NotImplemented:
             return
         self.managed = True
-        self.targets = tuple(values)
+        if isinstance(values, TrackedBodySamples):
+            self.targets = tuple(entity for entity, _ in values.rows)
+            self.instance.write(lvalue(self.node.field("m_CEE20F6F")), tuple(d for _, d in values.rows))
+        else:
+            self.targets = tuple(values)
         self.instance.write(lvalue(self.node.field("m_8A2905A0")), tuple(Entity(e) for e in self.targets))
 
     def tick(self) -> None:
+        if self.checked_frame is not None:
+            component = self.instance.component
+            frame = component.frame & FRAME_MASK
+            if frame == self.checked_frame or self.now % component.frame_ms != component.frame_ms - 1:
+                return
+            previous, self.checked_frame = self.checked_frame, frame
+            # 104319 CA9460: mode 1 uses a three-frame stride with an entity and node phase.
+            phase = 0x811C9DC5
+            key = (self.node.rid ^ component.entity) & FRAME_MASK
+            for byte in key.to_bytes(4, "little"):
+                phase = ((phase ^ byte) * 0x01000193) & FRAME_MASK
+            phased_frame = ((phase + frame + FRAME_HALF) & FRAME_MASK) - FRAME_HALF
+            if phased_frame % 3 != 0 and ((previous + 3) & FRAME_MASK) > frame:
+                return
         self.refresh()
 
+    def impact_sphere(self) -> bool:
+        """Recognize the authored owner-relative impact spheres."""
+        node_key = (self.instance.graph.index, self.node.pos)
+        if node_key not in ((0x160A, 19), (0x0B27, 152)):
+            return False
+        fields = self.node.fields
+        origin = fields.get("m_D59188D5") or {}
+        primary = fields.get("m_filter") or {}
+        masks = tuple(primary.get(name) for name in ("m_4EA686DB", "m_84065FD1", "m_89831602"))
+        target = lvalue(fields.get("m_8A2905A0"))
+        if not (
+            fields.get("m_95FFC3C5") == 1
+            and fields.get("m_3D667CE3") is None
+            and primary.get("$") == "STUConfigVarFilter"
+            and masks == (20, 64, 1)
+            and not any(value for key, value in primary.items() if key not in (
+                "$", "m_4EA686DB", "m_84065FD1", "m_89831602",
+            ))
+            and (fields.get("m_8DCA77B6") or {}).get("$") == "STU_B5A0CAF0"
+            and target is not None
+        ):
+            return False
+        if node_key == (0x0B27, 152):
+            return (
+                fields.get("m_DD792FF0") == 0
+                and fields.get("m_43478CAD") == 0
+                and fields.get("m_0297060F") == 0
+                and not origin
+                and lvalue(fields.get("m_CEE20F6F")) is None
+                and target == (0, 1182)
+            )
+        return (
+            fields.get("m_DD792FF0") == 3
+            and origin.get("$") == "STU_21A13145"
+            and (origin.get("m_entity") or {}).get("$") == "STU_B5A0CAF0"
+            and lvalue(fields.get("m_CEE20F6F")) is not None
+        )
+
     def hostile_body_profile(self) -> int | None:
-        """Recognize the authored hostile capsule query with line-of-sight profile 002C."""
+        """Recognize a supported hostile capsule query and its sight profile."""
+        if self.impact_sphere():
+            return 0x069000000000002D  # CAF17A-CAF1C7: absent profile defaults to 002D.
         fields = self.node.fields
         primary = fields.get("m_filter")
         secondary = fields.get("m_3D667CE3")
@@ -3376,6 +3509,7 @@ class TrackTargets(State):
         return profile
 
     def on_end(self, finished: bool) -> None:
+        self.checked_frame = None
         if self.count_var is not None:
             self.unlink(self.count_var)
             self.count_var = None
@@ -3395,6 +3529,66 @@ class TrackTargets(State):
             # The wire list retains rejected targets when the node authors a retention interval.
             return {"targets": ()}
         return {"targets": tuple((entity, 0) for entity in self.targets)}  # age policy unverified
+
+
+@state_class("STUStatescriptStateShockwave")
+class Shockwave(State):
+    """Run the grounded Slam wave's zero-radius begin and full-range first tick."""
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.target = lvalue(self.node.field("m_8A2905A0"))
+        self.managed = False
+
+    def on_begin(self) -> None:
+        component = self.instance.component
+        # The other authored wave profiles use timed growth or movement sampling.
+        if (
+            (self.instance.graph.index, self.node.pos) == (0x0B27, 95)
+            and self.target is not None
+            and self.node.field("m_04F3240D") is None
+            and truthy(self.evaluate(self.node.field("m_3418CEA4"), watch=False))
+            and self.collect(0.0)
+        ):
+            self.managed = True
+            self.ticks()
+        elif component.strict:
+            component.unsupported(self.instance, "shockwave service", self.node.cls, self.node)
+
+    def collect(self, reach: float) -> bool:
+        instance = self.instance
+        bodies = instance.component.world.shockwave_targets(self, reach)
+        if bodies is NotImplemented:
+            return False
+        current = instance.context().var(*self.target)
+        existing = current if isinstance(current, tuple) else ()
+        seen = {item.id for item in existing if isinstance(item, Entity)}
+        added = []
+        for body in bodies:
+            if expr.valid_entity(body) and body not in seen:
+                seen.add(body)
+                added.append(Entity(body))
+        if added:
+            instance.write(self.target, (*existing, *added))
+        return True
+
+    def tick(self) -> None:
+        # C95270: the authored immediate flag bypasses travel time, but the
+        # full-range query still runs on the first tick before FINISH.
+        reach = to_float(self.evaluate(self.node.field("m_6A79BD98"), watch=False))
+        if not self.collect(max(0.0, reach) if math.isfinite(reach) else 0.0):
+            component = self.instance.component
+            if component.strict:
+                component.unsupported(self.instance, "shockwave service", self.node.cls, self.node)
+        self.request_finish()
+
+    def on_cleanup(self) -> None:
+        self.managed = False
+
+    def payload(self) -> dict:
+        # The sampled bodies go through the authored output, separate from the
+        # optional native auxiliary list at +0x278.
+        return {"has_list": False} if self.managed else {}
 
 
 @state_class("STUStatescriptStatePhysicsExplosion", strict_only=True)
@@ -3578,6 +3772,7 @@ class SprayPlacement(State):
 
 
 WHEEL_VOICE_PULSE = (0x0686, 72)
+SLAM_IMPACT_ACTIONS = frozenset({(0x0B27, 46), (0x0B27, 102)})
 
 
 @state_class("STU_B9898052")
@@ -3614,7 +3809,7 @@ class ClientOnlyPulser(State):
         frame_ms = self.instance.component.frame_ms
         if wheel_voice:
             self.pulsed_at = self.now
-            world.replicate_wheel_event(self.instance, self.node)
+            world.replicate_frame_action(self.instance, self.node)
         elif self.now // frame_ms > self.instance.start // frame_ms:
             self.pulsed_at = self.now
 
@@ -3637,47 +3832,79 @@ class ActiveQuery(State):
         return super().plug_enter(input_path)
 
 
-@state_class("STU_4C96470A", strict_only=True)
-class SummonerPlacement(State):
-    """Confirm the map-authored placement sent by the Summoner's controller."""
+@state_class("STU_4C96470A")
+class PlacementSelector(State):
+    """Resolve the placement through its authored confirmation path."""
+
+    def airborne_slam(self) -> bool:
+        return (self.instance.graph.index, self.node.pos) == (0x0B27, 15)
 
     def on_created(self):
         self.confirmed = False
-        if (self.instance.graph.index, self.node.pos) != (0x156B, 57):
+        self.sampled = False
+        if (self.instance.component.strict and not self.airborne_slam()
+                and (self.instance.graph.index, self.node.pos) != (0x156B, 57)):
             self.instance.component.unsupported(self.instance, "state", self.node.cls, self.node)
 
     def on_enter(self):
-        self.ticks()
+        if self.airborne_slam():
+            if (self.node.field("m_B02B1FD7") is not None
+                    and truthy(self.evaluate(self.node.field("m_A6BB0869"), watch=False))):
+                self.ticks()
+        elif self.instance.component.strict:
+            self.ticks()
 
     def plug_enter(self, input_path: str) -> bool:
-        if input_path != "m_6647ED22":
+        if input_path != "m_6647ED22" or not (self.airborne_slam() or self.instance.component.strict):
             return super().plug_enter(input_path)
         if self.active:
             self.confirmed = True
         return True
 
     def tick(self):
+        instance, node = self.instance, self.node
+        if self.airborne_slam():
+            # 8E92D2 gates the ordinary cast on #1321. The authored transition
+            # consumes validity and starts MoveTo while this state is active.
+            frame_ms = instance.component.frame_ms
+            if ((not self.sampled or self.now % frame_ms == frame_ms - 1)
+                    and truthy(self.evaluate(node.field("m_B02B1FD7"), watch=False))):
+                self.sampled = True  # C83C50 permits the first sample before the frame boundary.
+                point = instance.component.world.select_landing(self)
+                if point is NotImplemented:
+                    if instance.component.strict:
+                        instance.component.unsupported(instance, "landing selection", node.cls, node)
+                else:
+                    self.publish(point, "m_C3240FFC")
+                    if point is not None:
+                        self.request_check()
+            return
         if not self.confirmed:
             return
-        instance, node = self.instance, self.node
         place = getattr(instance.component.world, 'summoner_placement', None)
         point = place(instance) if place is not None else NotImplemented
         if point is NotImplemented:
             instance.component.unsupported(instance, "Summoner placement source", node.cls, node)
-        valid = point is not None
-        if valid:
-            instance.write(expr.dynamic(node.field('m_2FECD1E3')), expr.Entity(0))
-            instance.write(expr.dynamic(node.field('m_1549F0F9')), expr.Entity(0))
-            instance.write(expr.dynamic(node.field('m_30710B76')), point)
-        instance.write(expr.dynamic(node.field('m_2339572B')), valid)
+        self.publish(point, "m_2339572B")
         self.confirmed = False
-        instance.follow(node, 'm_F6955E81' if valid else 'm_425337C6', self)
+        instance.follow(node, 'm_F6955E81' if point is not None else 'm_425337C6', self)
+
+    def publish(self, point, validity_field: str) -> None:
+        instance, node = self.instance, self.node
+        if point is not None:
+            instance.write(lvalue(node.field("m_2FECD1E3")), Entity(expr.INVALID_ENTITY))
+            instance.write(lvalue(node.field("m_1549F0F9")), Entity(expr.INVALID_ENTITY))
+            instance.write(lvalue(node.field("m_30710B76")), point)
+        instance.write(lvalue(node.field(validity_field)), point is not None)
 
     def on_cleanup(self):
         self.confirmed = False
+        self.sampled = False
 
     def payload(self):
-        return {'m_B4802CE3': int(self.confirmed)}
+        if self.airborne_slam() or self.instance.component.strict:
+            return {"m_B4802CE3": int(self.confirmed)}
+        return {}
 
 
 @state_class("STUStatescriptStatePet", strict_only=True)
@@ -3955,57 +4182,109 @@ def _raycast_request(instance: Instance, node) -> RaycastRequest | None:
     )
 
 
-def _raycast(instance: Instance, node) -> bool | NotImplementedType:
-    provider = instance.component.world.raycast_provider(instance, node)
-    if provider is None:
-        return NotImplemented
+def _raycast_targets(node) -> list[tuple[int, int] | None] | None:
     targets = []
     for field in _RAYCAST_OUTPUTS:
         config = node.field(field)
         try:
             target = lvalue(config)
         except (IndexError, TypeError, ValueError):
-            return NotImplemented
+            return None
         if config is not None and (target is None or target in targets):
-            return NotImplemented
+            return None
         targets.append(target)
+    return targets
+
+
+def _raycast_result(instance: Instance, node, provider) -> RaycastResult | None:
+    if provider is None:
+        return None
     request = _raycast_request(instance, node)
     if request is None:
-        return NotImplemented
+        return None
     result = provider(request)
     if not isinstance(result, RaycastResult) or type(result.hit) is not bool:
-        return NotImplemented
+        return None
     if result.entity is not None and not _ray_entity(result.entity):
-        return NotImplemented
+        return None
     if any(value is not None and not _finite_vector(value) for value in (result.point, result.normal)):
-        return NotImplemented
-    for target, value in zip(targets, (result.hit, result.entity, result.point, result.normal), strict=True):
-        if target is not None:
-            instance.write(target, value)
-    return True
+        return None
+    return result
 
 
 @handler("STU_08D6BA6E")
 def raycast_action(instance: Instance, node, caller) -> bool | NotImplementedType:
     """Run the authored type-0 cast when a provider can complete it."""
-    result = _raycast(instance, node)
-    if result is True:
-        instance.follow(node, "m_outPlug", None)
-    return result
+    provider = instance.component.world.raycast_provider(instance, node)
+    if provider is None:
+        return NotImplemented
+    targets = _raycast_targets(node)
+    if targets is None:
+        return NotImplemented
+    result = _raycast_result(instance, node, provider)
+    if result is None:
+        return NotImplemented
+    for target, value in zip(targets, (result.hit, result.entity, result.point, result.normal), strict=True):
+        if target is not None:
+            instance.write(target, value)
+    instance.follow(node, "m_outPlug", None)
+    return True
 
 
 @state_class("STUStatescriptStateRayCast")
 class RayCast(State):
-    """Refresh the authored query outputs while its subgraph is active."""
+    """Bind and refresh the cast outputs for the lifetime of the state."""
+
+    INVALID = Entity(expr.INVALID_ENTITY)
+    ZERO = Vec3(0.0, 0.0, 0.0)
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.links: tuple[Var, ...] = ()
+        self.values = (False, self.INVALID, self.ZERO, self.ZERO)
 
     def on_enter(self) -> None:
-        self.tick()
+        targets = _raycast_targets(self.node)
+        if targets is None:
+            component = self.instance.component
+            if component.strict:
+                component.unsupported(self.instance, "raycast outputs", self.node.cls, self.node)
+            return
+        self.values = (False, self.INVALID, self.ZERO, self.ZERO)
+        self.links = tuple(
+            self.link(target, slot) for slot, target in enumerate(targets) if target is not None
+        )
         self.ticks()
 
     def tick(self) -> None:
-        component = self.instance.component
-        if _raycast(self.instance, self.node) is NotImplemented and component.strict:
-            component.unsupported(self.instance, "raycast options", self.node.cls, self.node)
+        instance, node = self.instance, self.node
+        component = instance.component
+        provider = component.world.raycast_provider(instance, node)
+        result = _raycast_result(instance, node, provider)
+        if result is None:
+            if component.strict:
+                component.unsupported(instance, "raycast options", node.cls, node)
+            return
+        if result.hit:
+            values = (
+                True, result.entity or self.INVALID, result.point or self.ZERO, result.normal or self.ZERO,
+            )
+        else:
+            # The cached point and normal remain available after a miss.
+            values = (False, self.INVALID, *self.values[2:])
+        if values != self.values:
+            before = tuple(var.value() for var in self.links)
+            self.values = values
+            for var, value in zip(self.links, before, strict=True):
+                instance.changed(var, value)
+
+    def on_end(self, finished: bool) -> None:
+        for var in self.links:
+            self.unlink(var)
+        self.links = ()
+
+    def output(self, slot: int):
+        return self.values[slot]
 
 
 @handler("STUStatescriptActionSetVar")
@@ -4572,13 +4851,15 @@ def ultimate_base_action(instance: Instance, node, caller) -> bool:
 
 
 @handler("STU_7106C356", "STUStatescriptActionEffect")
-def wheel_presentation_action(instance: Instance, node, caller) -> bool:
+def presentation_action(instance: Instance, node, caller) -> bool:
+    location = (instance.graph.index, node.pos)
     if (node.cls == "STU_7106C356"
-            or (instance.graph.index, node.pos) in (
+            or location in SLAM_IMPACT_ACTIONS
+            or location in (
                 (0x02CF, 3), (0x02CF, 8), (0x05AD, 14),
                 (0x0686, 14), (0x0686, 15), (0x0686, 40), (0x0686, 41),
             )):
-        instance.component.world.replicate_wheel_event(instance, node)
+        instance.component.world.replicate_frame_action(instance, node)
     return no_op(instance, node, caller)
 
 

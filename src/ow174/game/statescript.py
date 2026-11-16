@@ -319,10 +319,15 @@ class Stream:
 # writers below cover these codecs. tests/runtime/test_statescript_codecs.py reads each back with the table.
 WRITERS = {
     spray_placement.CODEC,
-    "linked_target",
+    "linked_target", "none+u8", "shockwave", "start",
     "none", "switch", "stack", "anim", "chase", "button", "ability", "targets", "volley", "subscript",
     "message", "send", "link", "hits", "flags13", "frames", "counter2", "pulser", "two_bits", "value_slot",
 }  # fmt: skip
+
+# Permissive graph instances can leave these states without modeled payload data.
+PAYLOAD_REQUIRED = frozenset((
+    "start", "value_slot", "linked_target", "none+u8", "shockwave", spray_placement.CODEC,
+))
 
 
 def family(cls: str) -> str:
@@ -604,6 +609,9 @@ def write_payload(
         out.bits(payload.get("counter", 0) & 15, 4)
     elif kind == "volley":
         _write_volley(out, payload, frame_time)
+    elif kind == "start":
+        # C95C40 / C91150: the owner frame stores its time minus state start.
+        signed_var(out, frame_time - payload["start"])
     elif kind == "anim":
         out.bit(0)  # no linked state
         out.bits(payload.get("counter", 0) & 7, 3)
@@ -653,6 +661,8 @@ def write_payload(
     elif kind == "pulser":  # ClientOnlyPulser (0x7FF78990D760)
         out.bit(payload.get("fresh", False))
         out.bits(payload.get("count", 0) & 0xFF, 8)
+    elif kind in ("none+u8", "shockwave"):
+        codecs.write(out, codecs.codec(cls).layout, payload, owner=True, full=False)
     elif kind == spray_placement.CODEC:
         codecs.write(
             out, codecs.codec(cls).layout, spray_placement.wire_fields(payload), owner=True, full=False,
@@ -1022,9 +1032,9 @@ def remote_fields(cls: str, payload: dict) -> dict:
         return {"low": value & 63, "more": value >> 6 != 0, "high": value >> 6 & 127}
     if kind in ("link", "linked_target"):
         return {"link": get("link")}
-    if kind in ("frames", "value_slot"):
+    if kind in ("frames", "none+u8", "shockwave", "value_slot"):
         return dict(payload)
-    if kind in ("none", "stack", "send", "subscript", "targets"):
+    if kind in ("none", "start", "stack", "send", "subscript", "targets"):
         return {}
     if kind == spray_placement.CODEC:
         return spray_placement.wire_fields(payload)

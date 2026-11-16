@@ -26,6 +26,121 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-15
 
+#### Owner slows while charging
+
+- When a bound Stack's value reads its own variable, send the variable with
+  the value below the lowest such Stack, not the resolved value. The client
+  stores the sent value as the variable's base and evaluates each bound
+  Stack over it with its own copy of the state (client RVAs A0D2C0,
+  1BA78A0, 1BA70B0). The owner slow Stacks all have the form
+  `#23184 + x`, so the slow was added twice: Rocket Punch's charge (`0D06`
+  state 77, 0.5) became 1.0 and Doomfist could not walk while charging. In
+  build 104319, 15 owner slow Stacks have this form, among them Reaper's,
+  Reinhardt's, Mercy's, Roadhog's, Cassidy's, Brigitte's and Sigma's.
+  Stacks that replace the value, message receivers and ability pushes still
+  send the resolved value.
+- Add unit tests for the sent value and a prepared 104319 regression for
+  the charge slow's snapshot.
+- Passed Ruff, the public Python and dashboard tests and `git diff --check`.
+  The prepared runtime suite fails the same modules as on `6bb305e9`, from
+  missing local data.
+- Original client on the Practice Range: Doomfist walks while charging, at
+  2.7 to 2.8 m/s on the server (half the 5.5 m/s walk) with no
+  corrections. A minimum punch still dashes about 6.5 m and a full one about
+  20 m.
+
+#### Own body spawn under the floor
+
+- Put the own body's create movement state 18 frames past the packet frame
+  (`match.CREATE_LEAD`), not at the create's tick. At the create's tick, a frame
+  the original client had already predicted, it started its own body under the
+  floor until a record corrected it (the first Rocket Punch for Doomfist).
+  Soldier: 76, which gets a record every frame, was corrected at once.
+- Live A/B run with the original client on the Practice Range, alternating per
+  spawn of each hero: the only spawn under the floor was a Doomfist spawn with
+  the create's tick. Both Doomfist spawns and the Soldier: 76 spawn with the
+  lead were on the floor, and their punches showed no flash at the start.
+- The prepared-runtime create test now expects the lead and checks that a
+  later resend stays ahead.
+
+#### Rocket Punch start flash
+
+- Put the own body's create movement state at a real frame (now 18 frames past
+  the packet frame; see above), not at the create path's default `0xFFFFFFFE`.
+  The original client keeps every body's
+  movement states, its own one's too, and takes a record only when its frame is
+  above the newest kept one, compared unsigned (client RVA `7CA7D3`..`7CA7E7`,
+  before the record goes on to component 59). At `0xFFFFFFFE` the own body's
+  kept state stayed the spawn pose for good.
+- While Rocket Punch's `STU_4773DA56` registration (`0D06` #138) is on, the
+  client draws the first-person view from those kept states. It turns #138 on
+  by itself at the release, before the server's frame, so the view flashed to
+  the spawn pose at the start of every dash. Send the owner its body's records
+  from the charge (`0D06` ChaseVar #23, at least 0.2 s before the dash) and
+  while a `STU_4773DA56` registration is on.
+- Send #138 and its child #141 to the owner as on again, as retail does. This
+  replaces the "Rocket Punch view" withholding below.
+- Live A/B run with the original client on the Practice Range, with both
+  changes above, standing still while charging: 22 punches in blocks of six,
+  with #138 withheld or sent, full charge and taps. No flash at the start, and
+  the view stayed on the body through every dash. Nothing else odd was seen.
+- Tests: public `registration_view` window checks, the own create's frame in
+  `test_game_entity_lifecycle.py`, and the Rocket Punch runtime regressions now
+  expect records from the charge and #138 sent.
+
+#### Rocket Punch view
+
+- Leave Rocket Punch's `STU_4773DA56` registration (`0D06` #138, under the
+  dash's Stack #22) and its child `STU_D09BD154` (#141) out of the owner's
+  frames. The server still runs both. While the original client has #138 on,
+  it draws the first-person view at a fixed spot below the Practice Range
+  spawn room, wherever the body is, for the whole dash. Which client data puts
+  it there is unknown: the registration's code past its component lookup is
+  obfuscated. Roadhog's hook victim (`01C9` #22) and `007D` #7 use the same
+  class and are unchanged and untested.
+- Live A/B runs with the original client (three punches per variant): with
+  #138 left out the view follows the dash. Leaving out only #141, or sending
+  the aim lock #81, did not help. Away from spawn, the view jumped back below
+  the spawn room.
+- Add a public test for the withheld states and a prepared-runtime check that
+  the owner's frames leave out #138 and #141 for the whole dash while the
+  server keeps them on.
+- Original client with this change, full charge and minimum charge: the view
+  stays on the body and the dash can be seen. Still open: a brief flash below
+  the spawn area right at the start of the dash (likely the client predicting
+  #138 until the next server frame) and the gauntlet sitting slightly left
+  during the dash. Passed Ruff, 943 public Python tests, both Node suites and
+  the five Rocket Punch runtime tests.
+
+#### Rocket Punch dash
+
+- Send the owner its body's movement records while a mod of a server-only
+  MovementMod state moves the body, and for 250 ms after. The owning client
+  runs no server-only state, so it cannot predict Rocket Punch's dash (`0D06`
+  state 42). The server moved the body while the client stayed in place.
+  Only `0D06` has server-only movement mods in build 104319.
+- Apply the MovementMod's channel 2 direction vector (`STU_09F9B1FE`, set).
+  Forward throttle moves along the authored world direction (client RVAs
+  C33A85 through C33D91), so the dash keeps its release facing while the
+  view turns.
+- Add the synthetic `server-only-movement-v1` contract, unit tests for mod
+  collection and the record window, and a prepared 104319 regression for
+  minimum and full charge, a turning view, cancellation and a wall.
+- Passed Ruff, 940 public Python tests, six dashboard tests and the four new
+  Rocket Punch runtime tests, plus the mover, correction, move-to, slam and
+  movelog suites. `test_ssq`, the Rialto McCree radius test and the airborne
+  slam replay fail the same way on `c73e5a49`, from missing local data and a
+  replay `KeyError`.
+- Original client on the Practice Range: a minimum charge ends about 6 m
+  ahead and a full charge about 20 m ahead. A wall stops the dash, a turning
+  view keeps it straight, and a cancel stays in place. The traced server sent
+  records from the first frame of each of 29 dashes.
+- Still open: the view drops below the floor while the dash runs (also on
+  `c73e5a49`). Doomfist cannot walk while charging: the server sends the
+  charge slow's entity variable with the charge stack already applied, and
+  the client's self-referential stack applies it again (inference). Wall
+  impacts (`STU_FBFF5DE7`), target knockback and damage also remain open.
+
 #### Linux compatibility for the Python reference server and public tests
 
 - Deferred `ctypes.WinDLL("iphlpapi")` and `ctypes.WinDLL("kernel32")` loading in `ow174.launcher.connections` and `ow174.launcher.inject` behind `sys.platform == "win32"` lazy helpers so importing `ow174.cli` or running `--mode server` works on Linux.
@@ -46,6 +161,220 @@ This log records tested changes and their acceptance status. Entries are grouped
 - The public catalog test checks the working directory. Passed Ruff and the public Python tests.
 
 ### 2026-11-12
+
+#### Seismic Slam airborne targeting
+
+- Run the authored confirmation from the owner's first-person anchor and aim
+  through shared static collision. Evaluate both offset paths, landing slope
+  and clearance before publishing a fixed destination to MoveTo.
+- Exercise a real E press off a ledge through travel, landing and impact
+  damage. An empty-space confirmation keeps travel inactive and releases on
+  button-up.
+- Encode the selector's one-byte state for the owner and observers. Add the
+  synthetic confirmation contract and include placement, impact timing and
+  shockwave states in body snapshot validation.
+- Passed Ruff, 929 public Python tests, six dashboard tests and 124 runtime
+  regressions. A headless Practice Range cast used the prepared map collision
+  to travel from the balcony to the lower floor and start its impact.
+- Dynamic target receivers, map clipping, exact surface classification and
+  angle retries remain open. Original-client targeting preview, feel and
+  presentation still require acceptance.
+
+#### Seismic Slam landing effects
+
+- Send the authored body-attached landing effect and ground shockwave effect
+  through the same frame-action queue as communication effects.
+- Preserve the first action stamp on a lost frame for the owner and each
+  observer. Acknowledgement advances the stream, and late observers start
+  from the current action baseline.
+- Added a shared synthetic short-action retry fixture and a prepared 104319
+  regression covering both effects and the wave's contact target on a normal
+  grounded cast.
+- Passed Ruff, 927 public Python tests, six dashboard tests and 72
+  Doomfist, movement and communication-wheel runtime regressions.
+  Original-client playback, audio and prediction recovery remain pending.
+
+#### Seismic Slam ground shockwave
+
+- Run the authored initial and full-range samples of the grounded impact.
+  Resolve its forward sector from the saved landing point and authored yaw.
+- Check hostile bodies against static sight and ground continuity using the
+  shared collision scene. Apply the authored damage once to each selected
+  target. The graph's candidate filter excludes close-impact recipients.
+- Read the close sphere's maximum count from its actual 104319 field. Slam
+  leaves that field unset, and a regression covers six simultaneous close hits.
+- Encode the native empty auxiliary-list payload when an active wave reaches a
+  body frame. The wave can finish within one command frame.
+- Add a shared synthetic lifecycle fixture for wave sampling, deduplication
+  and child-state delivery.
+- Passed Ruff, 926 public Python tests, six dashboard tests and 113 prepared-runtime
+  combat, movement, collision and state-codec regressions. Static point samples
+  approximate native support contacts. Exact edge geometry, dynamic blockers,
+  displacement, live air targeting and original-client presentation remain open.
+
+#### Seismic Slam close impact
+
+- Finish the authored impact delay using the 104319 timer schedule and ordinary
+  finish callback as a server reconstruction.
+- Reuse the hostile capsule query for the owner-relative close sphere. Check
+  static sight from its centre and respect the authored five-target limit.
+- Apply the authored landing damage once per selected opponent through the
+  shared combat path. A grounded-cast regression checks both health and hit
+  notices for multiple targets and rejects allies, occluded and distant bodies.
+- Passed Ruff, the public Python and dashboard suites, and focused
+  prepared-runtime checks for Slam, movement, temporary shields, Piledriver,
+  and the state VM. Ground shockwave damage, displacement, dynamic visibility,
+  native candidate order at the target limit, live air targeting and
+  original-client acceptance remain open.
+
+#### Player weapon spread seed
+
+- Use the authored state-table index in the shared Quad Cannons and Fan the
+  Hammer seed calculation. Build 104319's state constructor stores that
+  index at +0x70 and its volley call reads the same word.
+- Passed 20 prepared-runtime Quad Cannons and McCree checks and Ruff.
+- Original-client owner seed identity and muzzle sampling remain open.
+
+#### Wrecking Ball Minefield arming effects
+
+- Send the deployed mine's two authored armed effect states after its arming
+  delay and after each viewer acknowledges the entity create. The normal
+  entity lifetime prevents a lost effect frame from retrying after removal.
+- Include both deployed mine graphs in new local runtime exports.
+- Passed 923 public Python tests, Ruff and six Minefield runtime checks.
+  A normal graph export from local 104319 XML includes both mine graphs.
+- Explosion and expiry effects, airborne presentation and original-client
+  acceptance remain open.
+
+#### Wrecking Ball Piledriver target reaction
+
+- Send the authored `165A` reaction to each selected opposing player using
+  the existing recipient PlayScript queue. The mover applies the velocity
+  reset and input limits, and releases control on the authored exit.
+- Retire explicitly stopped reaction roots so the next cast can start them.
+  Requests still carry the selected body identity across queued delivery.
+- Resolve the impact sight origin through the same authored stance and spring
+  anchor used by Seismic Slam.
+- Passed 923 public Python tests, Ruff and 82 targeted checks covering
+  Piledriver, recipient lifetimes, body VM storage and Doomfist regressions.
+- The launch impulse, NPC target movement and original-client presentation
+  remain open.
+
+#### Wrecking Ball Piledriver impact
+
+- Use the shared hostile capsule query to return target IDs and surface
+  distances to Piledriver's authored impact graph. Check static sight using
+  the fallback `002D` profile with its reconstructed static category.
+- Run the authored per-target damage loop on landing. Damage tapers from
+  100 inside 1.5 metres to 20 at 8 metres, with ordinary combat hit feedback.
+- Passed 923 public Python tests, six dashboard tests, Ruff and 102
+  prepared-runtime checks covering all three Wrecking Ball changes, Doomfist
+  reactions and shields, and weapon and VM regressions. Two historical
+  Soldier crash-frame comparisons fail identically on baseline `7636346`.
+- Dynamic visibility, victim displacement, impact presentation and
+  original-client acceptance remain open.
+
+#### Wrecking Ball Quad Cannons
+
+- Evaluate the authored spread angle at each shot and feed it into the same
+  deterministic cone sampler as McCree's Fan the Hammer.
+- Notify graph listeners when a volley spends ammunition, including on the
+  final shot. The Quad Cannons graph now starts its authored automatic reload
+  and resumes held fire after recovery.
+- Cover ammunition retention when primary fire exits Roll and the firing delay
+  before the guns become available. The original-client seed mapping, muzzle
+  and critical hit behavior remain open.
+- Passed 921 public Python tests, Ruff and 60 prepared-runtime checks covering
+  Quad Cannons, McCree's weapon, snapshots and native body replay.
+
+#### Wrecking Ball Minefield
+
+- Simulate the three authored launch volleys with 15 mines, reference-pose
+  muzzle offsets, launch speed and gravity. Publish landed entities with
+  50 health and synchronize damage and removal through the entity channel.
+- Arm deployed mines after 1.5 seconds and apply 130 damage to hostile bodies
+  in the trigger area with static sight checks. Expiry uses the 18–20 second
+  base duration and the owner's authored duration multiplier.
+- Passed 921 public Python tests, six dashboard tests, Ruff and 13
+  prepared-runtime checks for Minefield and both heroes' shields.
+- Flight contacts, mine hit geometry and spread seed mapping use server
+  reconstructions. Dynamic receivers, airborne replication, combat feedback
+  and original-client acceptance remain open.
+
+#### Seismic Slam movement
+
+- Resolve omitted state-switch values by their authored index. Grounded E now
+  executes the launch velocity action and enters the impact phase on landing.
+- Recheck the launch transition when the mover reports landing. The near-floor
+  jump case now releases its movement modifiers and comes to rest.
+- Read the selector's first-person anchor from the upright player's stance and
+  mover spring. Use Doomfist's authored 1.5 m standing and 1.2 m crouched heights.
+- Accept the selector's explicit invalid entity as a fixed world-space MoveTo
+  destination. Static target selection, impact completion, damage and original
+  client acceptance remain open.
+- Passed Ruff, 923 public Python tests, six dashboard tests and 22 focused
+  movement regressions, including grounded and near-floor Slam commands.
+
+#### Rising Uppercut target reaction
+
+- Evaluate the authored target ranking and send the target reaction script
+  to the selected opposing player bodies. Retain source and recipient
+  identities until delivery so a hero switch cannot affect a replacement body.
+- Run the authored velocity reset and airborne movement input limits through
+  the existing mover. Release the limits at the authored exit and retire the
+  reaction instance so a later cast can apply it again.
+- Passed Ruff, 923 public Python tests, six dashboard tests, 33 movement and
+  shield regressions and 44 communication-wheel regressions. The movement
+  checks cover the receiving player's owner state, recasts and body replacement.
+- The launch impulse, training-bot movement and original-client reaction
+  presentation remain open. Larger ranked arrays use stable tie ordering.
+
+#### Doomfist temporary shields
+
+- Feed applied damage into Doomfist's authored The Best Defense listener.
+  Eligible skill hits grant 30 shield, and the authored ultimate tag grants
+  75, up to 150 current temporary shield under the default ruleset.
+- Track grants separately within one named health pool. Shared damage consumes
+  temporary shields first. The authored wait starts shield-only decay at
+  three points per second under the default ruleset. Retire depleted grant
+  instances and discard queued hits for replaced bodies.
+- Regressions cover real Uppercut and Hand Cannon input, tagged and excluded
+  damage, lethal hits, absorption, cap, decay, and hero switching. Passed Ruff,
+  921 public Python tests, six dashboard tests and 44 communication-wheel
+  regressions. Native capacity display,
+  exact decay granularity, Meteor Strike gameplay and client acceptance remain open.
+
+#### Rising Uppercut target sampling
+
+- Keep the immediate entry query and sample new targets on the authored
+  three-frame phase. Derive the phase from the owner entity and graph node.
+- Preserve the frame gate in stored VM state. A command-path regression
+  checks that a target entering between samples is hit on the next sample.
+
+#### Seismic Slam and Piledriver ground queries
+
+- Bind shared RayCast outputs for the lifetime of the state and update them on
+  ticks. Preserve the previous point and normal on a miss and restore the
+  underlying values when the state ends.
+- Use the authored `002C.097` static category mask and expanded static geometry
+  when available. Dynamic receivers and original-client acceptance remain open.
+- Passed Ruff, 920 public Python tests, six dashboard tests and 51 prepared
+  runtime tests covering movement, Wrecking Ball and VM snapshots.
+
+#### Wrecking Ball Grappling Claw
+
+- Advance the authored hook trace to a static map hit or its range limit.
+  Reuse the graph's wall attachment, floor rejection, release and timeout
+  transitions.
+- Include the hook start time in owner state updates and retain the in-flight
+  trace in VM storage exports.
+- Passed 920 public Python tests, six dashboard tests, Ruff and 86
+  prepared-runtime checks. The latter cover hook travel and release, owner
+  and observer state filtering, codecs, snapshots, replay and movement.
+- Launch from the model's reference-pose hardpoint and query static geometry
+  using the body mover's collision category. Exact anchor filtering, dynamic
+  anchors, retraction geometry, swing, cooldown, high-speed impacts and
+  original-client acceptance remain open.
 
 #### Strict World query behavior contract
 

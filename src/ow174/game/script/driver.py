@@ -31,10 +31,18 @@ from ow174.game import animation_pose, pools, ult_charge
 from ow174.game.bits import BitWriter
 from ow174.game.commands import FRAME_HALF, FRAME_MASK, frame_distance
 from ow174.game.content import SOLDIER
-from ow174.game.script import expr, graph, nodes, runtime, spray_placement
+from ow174.game.script import (
+    expr,
+    graph,
+    grapple,  # noqa: F401 - registers the authored launch trace
+    nodes,
+    runtime,
+    spray_placement,
+)
 from ow174.game.script.codecs import stec_classes
 from ow174.game.script.expr import INSTANCE, Asset, Entity, Vec3, f32
 from ow174.game.statescript import (
+    PAYLOAD_REQUIRED,
     Binding,
     EventWire,
     InstanceWire,
@@ -59,6 +67,7 @@ from ow174.paths import (
 if TYPE_CHECKING:
     from ow174.game.match import Match
     from ow174.game.mover import VelocityChange
+    from ow174.game.script import play
     from ow174.game.world import EntityUpdate
 
 log = logging.getLogger("ow174.script")
@@ -188,6 +197,21 @@ WHEEL_CALLOUT_TEXTURES = {
 }
 # Static ray categories from the first request word, packed from m_category.
 WHEEL_TARGET_CATEGORIES = {0x0690000000000079: 0x1FDF, 0x0690000000000111: 0x1FDF}
+ABILITY_RAY_CATEGORIES = {0x069000000000002C: 0x1FDF}  # 104319 static cast profile
+TRACK_TARGET_RAY_CATEGORIES = {
+    **ABILITY_RAY_CATEGORIES,
+    0x069000000000002D: 0x1FDF,  # default 104319 tracker profile, using its static CBC flags
+}
+SHOCKWAVE_GROUND_CATEGORY = 0x1F9F  # 104319 ground probe profile 0016.097
+SLAM_LANDING_CATEGORY = 0x1F9F  # static category of 104319 profile 010C.097
+DOOMFIST_PASSIVE_GRAPH = 0x0DDD
+DOOMFIST_SHIELD_GRAPH = 0x0DF3
+UPPERCUT_TARGET_GRAPH = 0x0E7D
+BODY_PLAY_GRAPHS = {(DOOMFIST_PASSIVE_GRAPH, 4): DOOMFIST_SHIELD_GRAPH}
+TARGET_PLAY_GRAPHS = {
+    (0x0DD8, 22): UPPERCUT_TARGET_GRAPH,
+    (0x160A, 42): 0x165A,  # Piledriver's per-victim movement reaction
+}
 WHEEL_HEALING_TAG = 0x0D60000000000308
 WHEEL_GREETING_TAG = 0x0D60000000000661
 ASHE_BODY = 0x040000000000251C
@@ -300,7 +324,9 @@ class BodyWorld(runtime.World):
             return self.match.script_owner_movement_sample(self.body)
         return None
 
-    def static_ray(self, origin: Vec3, direction: Vec3, length: float) -> runtime.RaycastResult | None:
+    def static_ray(
+        self, origin: Vec3, direction: Vec3, length: float, category: int | None = None,
+    ) -> runtime.RaycastResult | None:
         match = self.match
         if match is None or match.collision_world is None:
             return None
@@ -309,8 +335,12 @@ class BodyWorld(runtime.World):
         if (mover is None or not math.isfinite(norm) or norm == 0 or not math.isfinite(length)
                 or length <= 0 or not all(math.isfinite(axis) for axis in origin)):
             return None
-        hit = match.collision_world.cast_ray(tuple(origin), tuple(axis / norm for axis in direction),
-                                             length, mover.category)
+        geometry = match.collision_world
+        if category is None:
+            category = mover.category
+        else:
+            geometry = geometry.ray_geometry or geometry
+        hit = geometry.cast_ray(tuple(origin), tuple(axis / norm for axis in direction), length, category)
         if hit is None:
             return runtime.RaycastResult(False, None, None, None)
         return runtime.RaycastResult(True, None, Vec3(*hit.point), Vec3(*hit.normal))
@@ -320,14 +350,47 @@ class BodyWorld(runtime.World):
         config = request.filter_config or {}
         resource = config.get("m_C1903771")
         if (not isinstance(resource, dict) or resource.get("$") != "STU_20DB8AB5"
-                or expr.guid_of(resource.get("m_C1903771")) != 0x069000000000002C
                 or resource.get("m_resourceKey") is not None
                 or request.radius != 0 or request.ignored_entities):
             return None
+        category = ABILITY_RAY_CATEGORIES.get(expr.guid_of(resource.get("m_C1903771")))
         fields = {"$", "m_C1903771", "m_EE729DCB"}
-        if any(value not in (None, 0) for key, value in config.items() if key not in fields):
+        if (category is None
+                or any(value not in (None, 0) for key, value in config.items() if key not in fields)):
             return None
-        return self.static_ray(request.origin, request.direction, request.length)
+        return self.static_ray(request.origin, request.direction, request.length, category)
+
+    def select_landing(self, state: runtime.State):
+        if self.match is None or (state.instance.graph.index, state.node.pos) != (0x0B27, 15):
+            return NotImplemented
+        fields = state.node.fields
+        query = fields.get("m_castFilter") or {}
+        profile = query.get("m_C1903771") or {}
+        if (expr.guid_of(profile.get("m_C1903771")) != 0x069000000000010C
+                or state.evaluate(fields.get("m_DC05B2EE"), watch=False) != Entity(self.body)):
+            return NotImplemented
+        geometry = self.match.collision_world
+        position = self.match.script_body_position(self.body, self.body)
+        direction = self.match.script_body_facing(self.body, self.body, pitched=True)
+        eye_y = state.evaluate(fields.get("m_6E8CA10B"), watch=False)
+        cast_fields = (
+            "m_6386E7B4", "m_3656A811", "m_B3094B0E", "m_2ADABA5F", "m_B42B2BEB",
+            "m_60B6AF94", "m_15F880A4",
+        )
+        length, radius, step, slope, spacing, clearance_height, reach_height = (
+            state.evaluate(fields.get(key), watch=False)
+            for key in cast_fields
+        )
+        values = (eye_y, length, radius, step, slope, spacing, clearance_height, reach_height)
+        if (geometry is None or position is None or direction is None
+                or not all(nodes._finite_number(value) for value in values)):
+            return None
+        point = geometry.landing_point(
+            (position.x, eye_y, position.z), tuple(direction), length,
+            radius=radius, step=step, slope=slope, sample_spacing=spacing, category=SLAM_LANDING_CATEGORY,
+            clearance_height=clearance_height, reach_height=reach_height,
+        )
+        return Vec3(*point) if point is not None else None
 
     def resolve_spray(self, length: float) -> dict | None:
         if self.communication_wheel and self.match is not None:
@@ -350,6 +413,20 @@ class BodyWorld(runtime.World):
         if cls == "STU_8CBDD81C" and self.match is not None and instance is not None:
             entity = expr.to_entity(instance.evaluate(cfg.get("m_entity")))
             return self.match.script_body_position(entity, self.body)
+        if cls == "STU_71A87E92" and self.match is not None and instance is not None:
+            # CCC750 accepts a bound entity at the origin and a nonzero vector as a literal point.
+            value = instance.evaluate(cfg.get("m_entity"))
+            if isinstance(value, Vec3) and value != Vec3(0, 0, 0):
+                return value
+            entity = expr.to_entity(value)
+            if expr.valid_entity(entity):
+                position = self.match.script_body_position(entity, self.body)
+                if position is not None:
+                    return position
+            return expr.EVALUATION_FAILED
+        if cls == "STU_21A13145" and self.match is not None and instance is not None:
+            entity = expr.to_entity(instance.evaluate(cfg.get("m_entity")))
+            return self.match.script_body_eye_position(entity, self.body)
         if (cls == "STU_9B7648C3" and instance is not None and instance.graph.index == 0x1177
                 and instance.component.entity == self.body
                 and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
@@ -466,7 +543,22 @@ class BodyWorld(runtime.World):
                         # The match does not attach a pet owner to these player bodies.
                         # Node 120 short-circuits before its component43 comparison.
                         return Entity(0)
-        if cls == "STU_AC829876":  # does an entity pass a filter (teams, tags): not modelled
+        if cls == "STU_783B4CF0" and self.match is not None and instance is not None:
+            kind = cfg.get("m_7E8B666C") or {}
+            pool_id = self._shield_pool_id(cfg)
+            if (pool_id is not None and kind.get("$") == "STU_297E1A30"
+                    and kind.get("m_7E8B666C") == 2
+                    and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
+                return self.temporary_shield_current(self.body, pool_id)
+        if cls == "STU_AC829876":
+            target_filter = cfg.get("m_filter") or {}
+            fields = {"$", "m_84065FD1", "m_66747E7D"}
+            if (self.match is not None and instance is not None
+                    and target_filter.get("$") == "STUConfigVarFilter"
+                    and target_filter.get("m_84065FD1") == 1 and target_filter.get("m_66747E7D") == 2
+                    and all(value in (None, 0) for key, value in target_filter.items() if key not in fields)):
+                target = expr.to_entity(instance.evaluate(cfg.get("m_entity")))
+                return self.match.script_hostile_body(self.body, target)
             expr.warn_once(cls, "entity filters (STU_AC829876) answer false")
             return False
         return super().native(cfg, instance)
@@ -476,9 +568,26 @@ class BodyWorld(runtime.World):
             return 0
         return self.match.combat.nearby_enemy_count(owner, radius)
 
-    def set_temporary_shield(self, owner: int, pool_id: int, amount: float) -> None:
+    @staticmethod
+    def _shield_pool_id(cfg: dict) -> int | None:
+        identifier = cfg.get("m_7BE02F89") or {}
+        guid = expr.guid_of(identifier.get("m_identifier"))
+        if identifier.get("$") == "STUConfigVarIdentifier" and guid >> 52 == 0x0D8:
+            return guid & 0xFFFFFFFF
+        return None
+
+    def set_temporary_shield(
+        self, owner: int, pool_id: int, amount: float, *, contributor: tuple[int, int] | None = None,
+    ) -> None:
         if self.match is not None and owner == self.body:
-            self.match.combat.set_temporary_shield(owner, pool_id, amount)
+            self.match.combat.set_temporary_shield(owner, pool_id, amount, contributor=contributor)
+
+    def temporary_shield_current(
+        self, owner: int, pool_id: int, *, contributor: tuple[int, int] | None = None,
+    ) -> float:
+        if self.match is None or owner != self.body:
+            return 0.0
+        return self.match.combat.temporary_shield_current(owner, pool_id, contributor=contributor)
 
     @staticmethod
     def equipped_wheel_asset(slots: tuple[int, ...], slot) -> Asset:
@@ -509,26 +618,44 @@ class BodyWorld(runtime.World):
         return -1
 
     def play_script(self, instance: runtime.Instance, node: graph.Node) -> None:
-        from ow174.game.script import play, play_queue
+        from ow174.game.script import play
 
-        index = WHEEL_PLAY_GRAPHS.get((instance.graph.index, node.pos))
-        if not self.communication_wheel or index is None:
+        key = (instance.graph.index, node.pos)
+        target_graph = TARGET_PLAY_GRAPHS.get(key)
+        index = target_graph if target_graph is not None else BODY_PLAY_GRAPHS.get(key)
+        if index is None and self.communication_wheel:
+            index = WHEEL_PLAY_GRAPHS.get(key)
+        if index is None:
             super().play_script(instance, node)
             return
         resource = play.resolve_resource(instance, node)
         if resource is None or resource.guid != ((graph.GRAPH_TYPE << 48) | index):
             return
-        definition = graph.graph(index)
-        if definition is None:
-            return
-        component = instance.component
         request = play.resolve_request(
             instance, node, resource,
             context_provider=lambda: play.InvocationContext(self.body, self.body, instance.source_entity()),
         )
-        if request is not None and request.targets == (self.body,):
-            # The bundle already holds the resource, so submission can flush synchronously.
-            play_queue.Queue(component, lambda _: play_queue.Load("ready", definition)).submit(request)
+        if request is None:
+            return
+        if target_graph is not None:
+            if self.match is not None:
+                self.match.queue_body_play(self.body, request)
+        elif request.targets == (self.body,):
+            self.submit_body_play(instance.component, request)
+
+    @staticmethod
+    def submit_body_play(component: runtime.Component, request: "play.Request") -> bool:
+        from ow174.game.script import play_queue
+
+        definition = graph.graph(request.resource.guid & 0xFFFFFFFFFFFF)
+        if definition is None:
+            return False
+        play_queue.Queue(component, lambda _: play_queue.Load("ready", definition)).submit(request)
+        return True
+
+    def retires_stopped_play(self, instance: runtime.Instance) -> bool:
+        index = instance.graph.index
+        return index == DOOMFIST_SHIELD_GRAPH or index in TARGET_PLAY_GRAPHS.values()
 
     def _wheel_animation_key(self, instance: runtime.Instance, node: graph.Node) -> tuple | None:
         parent = instance.parent
@@ -652,17 +779,20 @@ class BodyWorld(runtime.World):
                 return True
         return NotImplemented
 
-    def replicate_wheel_event(self, instance: runtime.Instance, node: graph.Node) -> None:
-        if not self.communication_wheel or node.remote < 0 or not node.is_networked:
+    def replicate_frame_action(self, instance: runtime.Instance, node: graph.Node) -> None:
+        """Queue an authored presentation event for the body streams."""
+        if node.remote < 0 or not node.is_networked:
             return
         index = instance.graph.index
+        key = (index, node.pos)
         legacy_symmetra = (
             self.body_definition == LEGACY_SYMMETRA_BODY and index == 0x0169 and node.pos in (82, 86)
         )
-        if index not in (0x02CF, 0x05AD, 0x0686) and not legacy_symmetra:
+        wheel = self.communication_wheel and (index in (0x02CF, 0x05AD, 0x0686) or legacy_symmetra)
+        if not wheel and key not in nodes.SLAM_IMPACT_ACTIONS:
             return
         component = instance.component
-        selected = instance.vars.get(29699)
+        selected = instance.vars.get(29699) if wheel else None
         values = []
         for row in node.field("m_BF5B22B7") or ():
             var = expr.guid_of(row.get("m_0D09D2D9")) & 0xFFFF
@@ -671,7 +801,7 @@ class BodyWorld(runtime.World):
             entity_scope = row.get("m_56341592") == expr.ENTITY
             slot = (component.vars if entity_scope else instance.vars).get(var)
             values.append(((0 if entity_scope else instance.id, var), (slot.value() if slot else None, ())))
-        if (index, node.pos) == nodes.WHEEL_VOICE_PULSE and selected is not None:
+        if key == nodes.WHEEL_VOICE_PULSE and selected is not None:
             values.append(((instance.id, 29699), (selected.value(), ())))
         serial = self.wheel_callouts[-1].serial + 1 if self.wheel_callouts else 1
         if index == 0x02CF and node.pos in (3, 8):
@@ -741,34 +871,136 @@ class BodyWorld(runtime.World):
             )
             return (target,) if target is not None else ()
 
-        if self.match is not None and state.hostile_body_profile() is not None:
+        category = TRACK_TARGET_RAY_CATEGORIES.get(state.hostile_body_profile())
+        if self.match is not None and category is not None:
             centre = state.evaluate(state.node.field("m_05BE62DD"), watch=False)
-            origin = state.evaluate(state.node.field("m_D59188D5"), watch=False)
+            origin_config = state.node.field("m_D59188D5")
+            origin = state.evaluate(origin_config, watch=False)
             radius = state.evaluate(state.node.field("m_radius"), watch=False)
+            if state.impact_sphere():
+                source = self.match._message_player(self.body)
+                if not (source is not None and source.mover is not None
+                        and nodes._finite_vector(centre)
+                        and (origin_config is None or nodes._finite_vector(origin))
+                        and nodes._finite_number(radius) and radius > 0):
+                    return runtime.TrackedBodySamples(())
+                from ow174.game.combat import aim
+
+                mover = source.mover
+                right = aim(mover.yaw + 16384, 0)
+                forward = aim(mover.yaw, 0)
+                # C9AFB0 transforms the local volume centre by the owner's body basis.
+                x, y, z = mover.position
+                centre = (
+                    f32(x + centre.x * right[0] + centre.z * forward[0]),
+                    f32(y + centre.y),
+                    f32(z + centre.x * right[2] + centre.z * forward[2]),
+                )
+                # CAF254 defaults an omitted sight origin to the transformed centre.
+                origin = centre if origin_config is None else tuple(origin)
+                rows = self.match.combat.track_hostile_bodies(self.body, centre, radius, origin, category)
+                limit = state.node.field("m_C39691D9")  # CAF449: maximum result count.
+                if limit is not None:
+                    count = state.evaluate(limit, watch=False)
+                    if type(count) is int:
+                        rows = rows[:max(0, count)]
+                return runtime.TrackedBodySamples(rows)
             if not (nodes._finite_vector(centre) and nodes._finite_vector(origin)
                     and nodes._finite_number(radius) and radius > 0):
                 return ()
-            # 002C.097 admits static category 1FDF. This tracker retains prior hits for the cast.
-            new_targets = self.match.combat.track_hostile_bodies(
-                self.body, tuple(centre), radius, tuple(origin), 0x1FDF, state.targets,
+            # This tracker retains prior hits for the cast.
+            rows = self.match.combat.track_hostile_bodies(
+                self.body, tuple(centre), radius, tuple(origin), category, state.targets,
             )
-            return state.targets + new_targets
+            return state.targets + tuple(entity for entity, _ in rows)
 
         from ow174.game import mccree
 
         return mccree.targets(self, state)
 
-    def modify_health(self, state, elapsed_ms):
-        """Queue one hit per body for the supported tracked damage configuration."""
-        config = state.node.field("m_modifyHealth") or {}
-        if (self.match is None or state.node.field("m_DD792FF0") != 3
-                or config.get("m_93CDFD2F") != 1):
+    def shockwave_targets(self, state, reach):
+        if self.match is None or (state.instance.graph.index, state.node.pos) != (0x0B27, 95):
             return NotImplemented
-        target = expr.lvalue(state.node.field("m_FA3ECC43"))
-        paired = expr.lvalue(state.node.field("m_B12BFE8B"))
-        if target is None or paired is None:
+        fields = state.node.fields
+        primary = fields.get("m_filter") or {}
+        masks = tuple(primary.get(key) for key in ("m_4EA686DB", "m_84065FD1", "m_89831602"))
+        sight = (fields.get("m_3D667CE3") or {}).get("m_C1903771") or {}
+        category = TRACK_TARGET_RAY_CATEGORIES.get(expr.guid_of(sight.get("m_C1903771")))
+        if masks != (20, 64, 1) or category is None:
+            return NotImplemented
+        centre = state.evaluate(fields.get("m_05BE62DD"), watch=False)
+        origin = state.evaluate(fields.get("m_D59188D5"), watch=False)
+        yaw = state.evaluate(fields.get("m_D45E22FA"), watch=False)
+        angle = state.evaluate(fields.get("m_A30B383E"), watch=False)
+        ground = tuple(state.evaluate(fields.get(key), watch=False) for key in
+                       ("m_E81B2985", "m_FF3B7DF2", "m_525E5A40"))
+        if not (nodes._finite_vector(centre) and nodes._finite_vector(origin)
+                and nodes._finite_number(yaw) and nodes._finite_number(angle)
+                and all(nodes._finite_number(value) and value >= 0 for value in ground)):
+            return ()
+        component = state.instance.component
+
+        def accepts(entity):
+            # CADA91 binds the iterator's candidate to the authored filter expression.
+            with component.parameter_scope({8: Entity(entity)}):
+                return state.evaluate(primary.get("m_condition"), watch=False) is True
+
+        return self.match.combat.shockwave_targets(
+            self.body, tuple(centre), tuple(origin), reach=reach, yaw=yaw, angle=angle, category=category,
+            ground=(*ground, SHOCKWAVE_GROUND_CATEGORY), accepts=accepts,
+        )
+
+    def modify_health(self, state, elapsed_ms):
+        """Apply named shield decay or report damage from a supported target tracker."""
+        config = state.node.field("m_modifyHealth") or {}
+        if state.instance.graph.index == DOOMFIST_PASSIVE_GRAPH and state.node.field("m_DD792FF0") == 2:
+            return self._decay_temporary_shield(state, config, elapsed_ms)
+        if self.match is None or config.get("m_93CDFD2F") != 1:
             return NotImplemented
         instance = state.instance
+        node_key = (instance.graph.index, state.node.pos)
+        mode = state.node.field("m_DD792FF0")
+        target_config = state.node.field("m_FA3ECC43")
+        discrete = (
+            (node_key == (0x160A, 16) and mode == 3)
+            or (node_key == (0x0B27, 154) and mode == 1 and expr.lvalue(target_config) == (0, 1182))
+        )
+        if discrete and state.node.field("m_8B707686") == 1:
+            if state.evaluate(config.get("m_instigator"), watch=False) != Entity(self.body):
+                return NotImplemented
+            if not elapsed_ms:
+                selection = state.evaluate(target_config, watch=False)
+                if mode == 3:
+                    selection = (selection,)
+                if isinstance(selection, tuple):
+                    victims = tuple(
+                        victim.id for victim in selection
+                        if isinstance(victim, Entity) and expr.valid_entity(victim.id)
+                    )
+                    self._queue_tracked_damage(state, config, victims, activation=None)
+                # The graph has committed the discrete hit and can advance its victim loop.
+                state.request_finish()
+            return True
+        if mode != 3:
+            return NotImplemented
+        target = expr.lvalue(target_config)
+        paired = expr.lvalue(state.node.field("m_B12BFE8B"))
+        if node_key == (0x0B27, 93) and target == (0, 375) and paired is None:
+            if state.evaluate(config.get("m_instigator"), watch=False) != Entity(self.body):
+                return NotImplemented
+            selection = state.evaluate(target_config, watch=False)
+            if isinstance(selection, tuple):
+                victims = tuple(dict.fromkeys(
+                    victim.id for victim in selection
+                    if isinstance(victim, Entity) and expr.valid_entity(victim.id)
+                    and victim.id not in state.hit_entities
+                ))
+                state.hit_entities.update(victims)
+                # The wave can close its subgraph before combat consumes this frame's damage.
+                self._queue_tracked_damage(state, config, victims, activation=None)
+            return True
+        if target is None or paired is None:
+            return NotImplemented
         tracker = next((
             tracker for tracker in instance.ticking
             if isinstance(tracker, nodes.TrackTargets) and tracker.active and tracker.managed
@@ -779,15 +1011,36 @@ class BodyWorld(runtime.World):
         if tracker is None or state.evaluate(config.get("m_instigator"), watch=False) != Entity(self.body):
             return NotImplemented
         targets = tuple(entity for entity in tracker.targets if entity not in state.hit_entities)
-        if targets:
-            from ow174.game.combat import hit_def
+        self._queue_tracked_damage(state, config, targets, activation=state.counter)
+        return True
 
-            hit = hit_def(state, {"m_modifyHealth": config})
-            if (hit is not None and math.isfinite(hit.amount) and hit.amount > 0
-                    and hit.loadout is not None and hit.loadout >> 52 == 0x0B9):
-                instance.component.damage_reports.append(
-                    (state, state.counter, targets, hit.amount, hit.loadout, hit.tags),
-                )
+    @staticmethod
+    def _queue_tracked_damage(state, config, targets, *, activation):
+        if not targets:
+            return
+        from ow174.game.combat import hit_def
+
+        hit = hit_def(state, {"m_modifyHealth": config})
+        if (hit is not None and math.isfinite(hit.amount) and hit.amount > 0
+                and hit.loadout is not None and hit.loadout >> 52 == 0x0B9):
+            state.instance.component.damage_reports.append(
+                (state, activation, targets, hit.amount, hit.loadout, hit.tags),
+            )
+
+    def _decay_temporary_shield(self, state, config, elapsed_ms):
+        pool_id = self._shield_pool_id(state.node.fields)
+        if (self.match is None or pool_id is None
+                or config.get("m_93CDFD2F") != 1
+                or state.evaluate(state.node.field("m_FA3ECC43"), watch=False) != Entity(self.body)
+                or state.evaluate(state.node.field("m_95F1FB0B"), watch=False) != 1):
+            return NotImplemented
+        rate = state.evaluate(config.get("m_amount"), watch=False)
+        if not nodes._finite_number(rate) or rate <= 0:
+            return NotImplemented
+        if elapsed_ms > 0:
+            self.match.combat.drain_temporary_shield(self.body, pool_id, rate * elapsed_ms / 1000.0)
+        if self.temporary_shield_current(self.body, pool_id) <= 0:
+            state.request_finish()
         return True
 
     def target_effects(self, state):
@@ -913,6 +1166,42 @@ class OwnerReport:
     introductions: frozenset[tuple[int, int]]
     received: bool | None = None
     sprays: frozenset[tuple[int, int, int]] = frozenset()  # instance, start, unlock
+
+
+def sent_links(var: runtime.Var) -> list[runtime.Link]:
+    """The links the client gets as the variable's bindings: active networked Stack entries."""
+    return [link for link in var.links if link.stack and link.state.active and link.state.networked]
+
+
+def sent_value(var: runtime.Var, links: list[runtime.Link] | None = None):
+    """The value to send with the variable's bindings. The client stores it as the variable's base and
+    resolves the bindings over it with its own copies of the bound states (read 0x7FF78991D2C0, store
+    0x7FF78AAB78A0, resolve 0x7FF78AAB70B0). A Stack whose value reads its own variable, as in an owner
+    slow `#23184 + 0.5`, would add again to a resolved base, so the base is the value below the lowest
+    such Stack. Every other binding replaces the base on the client, and the resolved value stays."""
+    links = sent_links(var) if links is None else links
+    below = next((link.state for link in links if _adds_to_own_output(link.state, var)), None)
+    return var.value() if below is None else var.value(below=below)
+
+
+def _adds_to_own_output(state: runtime.State, var: runtime.Var) -> bool:
+    """A bound Stack whose value expression reads the variable it outputs to."""
+    if not state.reads_below(var):
+        return False
+    target = state.node.field("m_out_Var")
+    if not isinstance(target, dict):
+        return False
+    return _reads_dynamic(state.node.field("m_value"), target.get("m_identifier"), target.get("m_60DB8F99"))
+
+
+def _reads_dynamic(cfg, identifier, scope) -> bool:
+    if isinstance(cfg, dict):
+        if cfg.get("$") == "STUConfigVarDynamic":
+            return cfg.get("m_identifier") == identifier and cfg.get("m_60DB8F99") == scope
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg.values())
+    if isinstance(cfg, list):
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg)
+    return False
 
 
 def _same_var(a, b) -> bool:
@@ -1206,13 +1495,13 @@ class BodyScript(ReplicatedBody):
         return Snapshot(self.frame, callout=history[-1].serial, callouts=tuple(pending))
 
     def _add_var(self, snap: Snapshot, owner: int, var_id: int, var: runtime.Var) -> None:
+        links = sent_links(var)
         bindings = tuple(
             Binding(link.state.instance.id, link.state.index, link.slot, link.priority, link.above,
                     link.dynamic, link.frame_cached)
-            for link in var.links
-            if link.stack and link.state.active and link.state.networked
+            for link in links
         )
-        value = var.value()
+        value = sent_value(var, links)
         if value is not None or bindings:
             snap.vars[(owner, var_id)] = (value, bindings)
 
@@ -1230,7 +1519,7 @@ class BodyScript(ReplicatedBody):
             return
         codec = family(cls)
         payload = state.payload() if codec != "none" else {}
-        if codec in ("value_slot", "linked_target", spray_placement.CODEC) and not payload:
+        if codec in PAYLOAD_REQUIRED and not payload:
             return
         snap.states[(owner, index)] = (cls, state.active, tuple(sorted(payload.items())))
 
@@ -1384,7 +1673,7 @@ class BodyScript(ReplicatedBody):
             return False
         snapshot, _ = pending
         changed = any(
-            not expr.same(snapshot.vars.get((0, var), (None, ()))[0], self.component.vars[var].value())
+            not expr.same(snapshot.vars.get((0, var), (None, ()))[0], sent_value(self.component.vars[var]))
             for var in (HUD_HEALTH, HUD_MAX_HEALTH)
         )
         return changed and any(

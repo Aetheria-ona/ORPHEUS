@@ -62,7 +62,7 @@ from ow174.game.mover import mover_data
 from ow174.game.props import ModelPose
 from ow174.game.script import expr, graph, nodes, runtime
 from ow174.game.script.bot import DIED, BotScript
-from ow174.game.script.driver import OWNER_HEALTH, Snapshot
+from ow174.game.script.driver import ABILITY_RAY_CATEGORIES, OWNER_HEALTH, Snapshot
 from ow174.game.statescript import InstanceWire, StateWire, remote_full_frame
 from ow174.game.world import ARMOUR_POOL, HEALTH_POOL, OP_DESTROY, POOLS, SHIELDS_POOL
 
@@ -82,8 +82,8 @@ MODE_UI = 0x0CB6  # the mode's client UI graph: the kill feed 0DEA and the notic
 
 EYE = 1.55  # m: STUFirstPersonComponent m_E29993A5, its default (OWLib) and Soldier's (DATA; unverified: eye)
 #104319 STUFirstPersonComponent: m_E29993A5 standing, m_816B830F crouched.
-EYE_STANDING = {0x04000000000002A3: 1.425}
-EYE_CROUCHED = {0x04000000000003CF: 1.085, 0x04000000000002A3: 0.9975}
+EYE_STANDING = {0x04000000000002A3: 1.425, 0x0400000000001235: 1.5}
+EYE_CROUCHED = {0x04000000000003CF: 1.085, 0x04000000000002A3: 0.9975, 0x0400000000001235: 1.2}
 EYE_CROUCHED_DEFAULT = 1.15
 HEAD_BELOW = 0.2  # m under the eye where the head starts (unverified)
 HISTORY = 64  # ticks of body positions kept for the shots' view time (about 1 s; unverified: retail's limit)
@@ -296,6 +296,9 @@ class WaveHealthPool:
     current: float
 
 
+ShieldContributions = dict[tuple[int, int] | None, tuple[float, float]]
+
+
 class Vitals:
     """A body's pools as component 51 has them: health, armour, shields (world.health's ids and fields)."""
 
@@ -303,7 +306,9 @@ class Vitals:
         self.entity = entity
         self.most = {HEALTH_POOL: float(health), ARMOUR_POOL: float(armour), SHIELDS_POOL: float(shields)}
         self.now = dict(self.most)
-        self.temporary_shields: dict[int, tuple[int, float, float]] = {}
+        # Wire slot -> (pool identifier, contributor -> (capacity, current)).
+        # A None contributor keeps the existing single-pool lifetime behavior.
+        self.temporary_shields: dict[int, tuple[int, ShieldContributions]] = {}
         self.ids = {}
         pool_id = 1
         for kind in (SHIELDS_POOL, ARMOUR_POOL):  # world.health numbers them so
@@ -325,32 +330,86 @@ class Vitals:
     @property
     def total(self) -> float:
         bonus = self.wave_health.current if self.wave_health is not None else 0.0
-        return sum(self.now.values()) + bonus + sum(now for _, _, now in self.temporary_shields.values())
+        temporary = sum(
+            current for _, rows in self.temporary_shields.values() for _, current in rows.values()
+        )
+        return sum(self.now.values()) + bonus + temporary
 
     @property
     def capacity(self) -> float:
-        return self.normal_health(maximum=True) + sum(most for _, most, _ in self.temporary_shields.values())
+        temporary = sum(
+            capacity for _, rows in self.temporary_shields.values() for capacity, _ in rows.values()
+        )
+        return self.normal_health(maximum=True) + temporary
 
-    def set_temporary_shield(self, pool_id: int, amount: float) -> None:
-        for slot, (existing, _, _) in self.temporary_shields.items():
-            if existing == pool_id:
-                if amount <= 0.0:
-                    self.temporary_shields[slot] = (0, 0.0, 0.0)
-                    self.changed.add(SHIELDS_POOL)
-                return
-        if amount <= 0.0 or self.dead:
+    def _shield_contributions(self, pool_id: int) -> ShieldContributions | None:
+        return next((rows for existing, rows in self.temporary_shields.values() if existing == pool_id), None)
+
+    def set_temporary_shield(
+        self, pool_id: int, amount: float, *, contributor: tuple[int, int] | None = None,
+    ) -> None:
+        """Register one grant, or remove its remaining contribution when its state ends."""
+        if pool_id <= 0 or not math.isfinite(amount):
             return
-        # Slot zero of this kind is reserved for the body's permanent shield.
-        for slot in range(1, POOLS):
-            if not self.temporary_shields.get(slot, (0, 0.0, 0.0))[0]:
-                self.temporary_shields[slot] = (pool_id, amount, amount)
+        rows = self._shield_contributions(pool_id)
+        if amount <= 0.0:
+            if rows is not None and contributor in rows:
+                del rows[contributor]
                 self.changed.add(SHIELDS_POOL)
-                return
+            return
+        if self.dead:
+            return
+        if rows is None:
+            # Slot zero of this kind is reserved for the body's permanent shield.
+            for slot in range(1, POOLS):
+                entry = self.temporary_shields.get(slot)
+                if entry is None or not entry[1]:
+                    rows = {}
+                    self.temporary_shields[slot] = (pool_id, rows)
+                    break
+        if rows is not None and contributor not in rows:
+            rows[contributor] = (amount, amount)
+            self.changed.add(SHIELDS_POOL)
+
+    def temporary_shield_current(self, pool_id: int, *, contributor: tuple[int, int] | None = None) -> float:
+        rows = self._shield_contributions(pool_id)
+        if rows is None:
+            return 0.0
+        if contributor is not None:
+            return rows.get(contributor, (0.0, 0.0))[1]
+        return sum(current for _, current in rows.values())
+
+    def _drain_shield_contributions(self, rows: ShieldContributions, amount: float) -> float:
+        """Consume grants in their registration order, releasing depleted stacked grants."""
+        left = amount
+        taken = 0.0
+        for contributor, (capacity, current) in tuple(rows.items()):
+            take = min(left, current)
+            if take <= 0.0:
+                continue
+            if contributor is not None and take == current:
+                del rows[contributor]
+            else:
+                rows[contributor] = (capacity, current - take)
+            left -= take
+            taken += take
+            if left <= 0.0:
+                break
+        if taken > 0.0:
+            self.changed.add(SHIELDS_POOL)
+        return taken
+
+    def drain_temporary_shield(self, pool_id: int, amount: float) -> float:
+        """Drain just the named temporary shield, up to its available current value."""
+        rows = self._shield_contributions(pool_id)
+        if rows is None or not math.isfinite(amount) or amount <= 0.0:
+            return 0.0
+        return self._drain_shield_contributions(rows, amount)
 
     def clear_temporary_shields(self) -> None:
-        for slot, (pool_id, _, _) in self.temporary_shields.items():
-            if pool_id:
-                self.temporary_shields[slot] = (0, 0.0, 0.0)
+        for _, rows in self.temporary_shields.values():
+            if rows:
+                rows.clear()
                 self.changed.add(SHIELDS_POOL)
 
     def add_wave_health(self, amount: float):
@@ -392,13 +451,12 @@ class Vitals:
         """
         left = max(0.0, amount)
         taken = 0.0
-        for slot, (pool_id, most, current) in self.temporary_shields.items():
-            take = min(left, current)
-            if take > 0.0:
-                self.temporary_shields[slot] = (pool_id, most, current - take)
-                self.changed.add(SHIELDS_POOL)
-                left -= take
-                taken += take
+        for _, rows in self.temporary_shields.values():
+            if left <= 0.0:
+                break
+            take = self._drain_shield_contributions(rows, left)
+            left -= take
+            taken += take
         for kind in (SHIELDS_POOL, ARMOUR_POOL, HEALTH_POOL):
             if left <= 0.0:
                 break
@@ -447,8 +505,12 @@ class Vitals:
                 bonus = self.wave_health
                 parts[1] = (world.pool(self.wave_health_id, kind, bonus.capacity, bonus.current)
                             if bonus is not None else world.pool(0, kind, 0, 0))
-        for slot, (pool_id, most, current) in self.temporary_shields.items():
-            parts[SHIELDS_POOL * POOLS + slot] = world.pool(pool_id, SHIELDS_POOL, most, current)
+        for slot, (pool_id, rows) in self.temporary_shields.items():
+            most = sum(capacity for capacity, _ in rows.values())
+            current = sum(remaining for _, remaining in rows.values())
+            parts[SHIELDS_POOL * POOLS + slot] = world.pool(
+                pool_id if rows else 0, SHIELDS_POOL, most, current,
+            )
         return {51: parts}
 
 
@@ -695,7 +757,8 @@ class Combat:
 
     def _hit_effect(self, target: Target, effect: int | None, *, shooter=None) -> None:
         """Apply the reconstructed Flashbang interruption and the scoped Talon reaction."""
-        if effect != FLASHBANG_EFFECT or self.vitals_of(target).dead:
+        if (effect != FLASHBANG_EFFECT or isinstance(target.owner, projectiles.Mine)
+                or self.vitals_of(target).dead):
             return
         variables = graph.mode_variables(self.match.game_map.mode_guid) or {}
         duration = 1.7 if expr.truthy(variables.get(FLASHBANG_MODE_FLAG)) else 0.8
@@ -807,16 +870,19 @@ class Combat:
                 log.exception("[game] %s: %s's Tesla Cannon failed", self.match.label(), player.name)
 
     def _apply_tracked_damage(self, player, frame: int, reports) -> None:
-        """Apply active state reports after the body VM has finished its frame."""
+        """Apply state reports after the body VM has finished its frame."""
         enemies = {target.entity: target for target in self._enemies(player)}
         for state, activation, entities, amount, loadout, tags in reports:
-            if not state.active or state.counter != activation:
+            if activation is not None and (not state.active or state.counter != activation):
                 continue
             for entity in entities:
                 target = enemies.get(entity)
-                if target is None or entity in state.hit_entities or self.vitals_of(target).dead:
+                if target is None or self.vitals_of(target).dead:
                     continue
-                state.hit_entities.add(entity)
+                if activation is not None:
+                    if entity in state.hit_entities:
+                        continue
+                    state.hit_entities.add(entity)
                 self._damage(player, target, amount, False, loadout, frame, hit_tags=tags)
 
     def _tesla(self, player, command, script) -> None:
@@ -946,7 +1012,7 @@ class Combat:
                 self.respawns.remove((when, who))
                 self._respawn(who)
         self.voice.expire(now)
-        current = {target.entity for target in self._targets()}
+        current = {target.entity for target in self._targets()} | self.projectiles.mines.keys()
         for entity, (deadline, _) in tuple(self.npc_hit_reactions.items()):
             if entity not in current or deadline <= tick:
                 self._end_npc_hit_reaction(entity)
@@ -989,7 +1055,9 @@ class Combat:
     def body_vitals(self, entity: int, owner) -> Vitals:
         found = self.vitals.get(entity)
         if found is None:
-            if isinstance(owner, bots.Bot):
+            if isinstance(owner, projectiles.Mine):
+                found = Vitals(entity, projectiles.MINE_HEALTH)
+            elif isinstance(owner, bots.Bot):
                 found = Vitals(entity, owner.health)
             else:
                 found = Vitals(entity, *pools.body_pools(owner.hero.guid))
@@ -1010,13 +1078,31 @@ class Combat:
             for target in targets
         )
 
-    def set_temporary_shield(self, owner: int, pool_id: int, amount: float) -> None:
+    def set_temporary_shield(
+        self, owner: int, pool_id: int, amount: float, *, contributor: tuple[int, int] | None = None,
+    ) -> None:
         target = next((target for target in self._targets() if target.entity == owner), None)
         if target is None:
             return
         vitals = self.vitals_of(target)
-        vitals.set_temporary_shield(pool_id, amount)
+        vitals.set_temporary_shield(pool_id, amount, contributor=contributor)
         self._sync_body_health(target.owner, vitals)
+
+    def temporary_shield_current(
+        self, owner: int, pool_id: int, *, contributor: tuple[int, int] | None = None,
+    ) -> float:
+        vitals = self.vitals.get(owner)
+        return 0.0 if vitals is None else vitals.temporary_shield_current(pool_id, contributor=contributor)
+
+    def drain_temporary_shield(self, owner: int, pool_id: int, amount: float) -> float:
+        player = self.match._message_player(owner)
+        vitals = self.vitals.get(owner)
+        if player is None or vitals is None or vitals.dead:
+            return 0.0
+        drained = vitals.drain_temporary_shield(pool_id, amount)
+        if drained > 0.0:
+            self._sync_body_health(player, vitals)
+        return drained
 
     def clear_temporary_shields(self, owner: int) -> None:
         vitals = self.vitals.get(owner)
@@ -1024,9 +1110,9 @@ class Combat:
             vitals.clear_temporary_shields()
 
     def track_hostile_bodies(
-        self, owner: int, centre, radius: float, origin, category: int, tracked: tuple[int, ...],
-    ) -> tuple[int, ...]:
-        """Resolve the supported authored filter against ordinary player and NPC capsules."""
+        self, owner: int, centre, radius: float, origin, category: int, tracked: tuple[int, ...] = (),
+    ) -> tuple[tuple[int, float], ...]:
+        """Resolve visible hostile body capsules and their surface distances from the query centre."""
         collision = self.match.collision_world
         source = self.match._message_player(owner)
         if collision is None or source is None:
@@ -1036,11 +1122,40 @@ class Combat:
         # The modeled player and bot bodies stand in for the native category and tag checks.
         # CA7C4C/C8E660 compare the query sphere with the candidate's stance capsule.
         for target in self._enemies(source):
-            if (target.entity in tracked
-                    or segment_distance(centre, *target.segment()) > radius + target.radius):
+            if target.entity in tracked:
+                continue
+            axis_distance = segment_distance(centre, *target.segment())
+            if axis_distance > radius + target.radius:
                 continue
             pose = self.model_pose_for(target.entity)
             if _communication_visible(rays, origin, target, category, pose):
+                found.append((target.entity, expr.f32(max(0.0, axis_distance - target.radius))))
+        return tuple(found)
+
+    def shockwave_targets(
+        self, owner: int, centre, origin, *, reach: float, yaw: float, angle: float, category: int,
+        ground: tuple[float, float, float, int], accepts,
+    ) -> tuple[int, ...]:
+        """Select opposing bodies in a grounded sector using the shared static scene."""
+        collision = self.match.collision_world
+        source = self.match._message_player(owner)
+        if collision is None or source is None:
+            return ()
+        rays = collision.ray_geometry or collision
+        heading = math.radians(yaw)
+        forward_x, forward_z = math.sin(heading), math.cos(heading)
+        half_angle = math.cos(math.radians(angle * 0.5))
+        found = []
+        for target in self._enemies(source):
+            x, _, z = _sub(target.feet, centre)
+            distance = math.hypot(x, z)
+            if distance > reach or x * forward_x + z * forward_z < distance * half_angle:
+                continue
+            if not accepts(target.entity):
+                continue
+            if not _communication_visible(rays, origin, target, category, self.model_pose_for(target.entity)):
+                continue
+            if collision.shockwave_ground(origin, target.feet, *ground):
                 found.append(target.entity)
         return tuple(found)
 
@@ -1129,11 +1244,11 @@ class Combat:
                 best, best_score = target.entity, score
         return best
 
-    def _enemies(self, shooter) -> list[Target]:
+    def _enemies(self, shooter, *, candidates=None) -> list[Target]:
         free_for_all = self.match.game_map.free_for_all
         source = _source_entity(shooter)
         found = []
-        for target in self._targets():
+        for target in self._targets() if candidates is None else candidates:
             if target.owner is shooter or target.entity == source:
                 continue
             if not free_for_all and target.team == shooter.team:
@@ -1146,8 +1261,20 @@ class Combat:
     def _ally(self, shooter, target: Target) -> bool:
         return not self.match.game_map.free_for_all and target.team == shooter.team
 
+    def _enemy_mines(self, shooter):
+        free_for_all = self.match.game_map.free_for_all
+        for mine in self.projectiles.mines.values():
+            if mine.armed_at is None or mine.owner is shooter:
+                continue
+            if free_for_all or mine.team != shooter.team:
+                yield Target(
+                    mine.entity, mine.team, mine.position, projectiles.MINE_HEIGHT,
+                    projectiles.MINE_HIT_RADIUS, projectiles.MINE_HEIGHT, mine,
+                )
+
     def _shot_targets(self, shooter, direct: HitDef | None) -> list[Target]:
         targets = self._enemies(shooter)
+        targets.extend(self._enemy_mines(shooter))
         if direct is None or direct.ally_heal <= 0.0 or self.match.game_map.free_for_all:
             return targets
         for target in self._targets():
@@ -1160,6 +1287,8 @@ class Combat:
 
     def seen(self, target: Target, view_tick: float) -> Target | None:
         """Interpolate retained poses or use the nearest sample for a body that already existed."""
+        if isinstance(target.owner, projectiles.Mine):
+            return target if view_tick >= target.owner.tick else None
         replaced_at = self.replacement_ticks.get(target.entity)
         if replaced_at is not None and view_tick < replaced_at:
             return None
@@ -1327,9 +1456,11 @@ class Combat:
             origin, direction = (x, y + EYE, z), aim(round(shooter.yaw), round(shooter.pitch))
         else:
             origin, direction = self._eye(shooter), aim(*command.aim())
-            from ow174.game import mccree
+            from ow174.game import mccree, weapon_spread
 
-            direction = mccree.fan_direction(shooter, state, direction, number, time, activation)
+            direction = weapon_spread.player_volley_direction(
+                shooter, state, direction, number, time, activation,
+            )
         if not npc and state.instance.graph.index == 0x01EE:
             from ow174.game import mccree
 
@@ -1360,6 +1491,15 @@ class Combat:
             entity_def = (node.field("m_projectileEntity") or {}).get("m_entityDef")
             definition = state.evaluate(entity_def, watch=False) if entity_def is not None else None
             shot = None
+            if isinstance(definition, expr.Asset) and definition.guid == projectiles.MINE_ENTITY:
+                if not npc:
+                    x, y, z = shooter.mover.position
+                    launch = _along(
+                        (x, y + projectiles.MINE_MUZZLE_HEIGHT, z), aim(shooter.mover.yaw, 0),
+                        projectiles.MINE_MUZZLE_FORWARD,
+                    )
+                    self.projectiles.launch_mines(shooter, state, launch, speed, number, activation)
+                return
             if isinstance(definition, expr.Asset):
                 shot = self.projectiles.fired(
                     shooter, state, shot_frame, definition.guid, lifetime, origin, direction,
@@ -1428,6 +1568,8 @@ class Combat:
     def _hitscan(self, shooter, state, origin, direction, reach, targets, direct, shot_frame, world_tick):
         best = None
         for target, shown in targets:
+            if isinstance(target.owner, projectiles.Mine) and target.entity not in self.projectiles.mines:
+                continue  # an earlier pellet in the same volley destroyed it
             a, b = shown.segment()
             t = ray_capsule(origin, direction, a, b, shown.radius)
             if t is not None and t <= reach and (best is None or t < best[0]):
@@ -1447,7 +1589,8 @@ class Combat:
             self._heal(shooter, target, direct.ally_heal)
             return
         hit_y = origin[1] + direction[1] * t
-        critical = hit_y >= shown.feet[1] + shown.eye - HEAD_BELOW
+        critical = (not isinstance(target.owner, projectiles.Mine)
+                    and hit_y >= shown.feet[1] + shown.eye - HEAD_BELOW)
         amount = direct.amount * direct.scale(t) * (direct.critical if critical else 1.0)
         self._damage(
             shooter, target, amount, critical and direct.critical > 1.0, direct.loadout, shot_frame,
@@ -1561,6 +1704,7 @@ class Combat:
                 self._heal(rocket.shooter, struck, direct.ally_heal)
             else:
                 critical = (direct.projectile_headshot and direct.critical > 1.0
+                            and not isinstance(struck.owner, projectiles.Mine)
                             and point[1] >= struck.feet[1] + struck.eye - HEAD_BELOW)
                 amount = direct.amount * (direct.critical if critical else 1.0)
                 if rocket.scale_direct:
@@ -1580,7 +1724,7 @@ class Combat:
         shields_present = impact_barrier is not None or getattr(
             getattr(self.match, 'scene_host', None), 'barriers', None,
         )
-        for target in self._enemies(rocket.shooter):
+        for target in [*self._enemies(rocket.shooter), *self._enemy_mines(rocket.shooter)]:
             a, b = target.segment()
             distance = max(0.0, segment_distance(point, a, b) - target.radius)
             scalar = blast.splash(distance)
@@ -1612,6 +1756,29 @@ class Combat:
             self.rockets.remove(rocket)
         if rocket.shot is not None:
             self.projectiles.flown(rocket.shot, rocket.flown)
+
+    def trigger_mines(self, mines: list[projectiles.Mine]) -> None:
+        collision = self._collision()
+        rays = collision.ray_geometry or collision
+        category = ABILITY_RAY_CATEGORIES[projectiles.MINE_TRACK_FILTER]
+        candidates = self._targets()
+        for mine in mines:
+            x, y, z = mine.position
+            centre = (x, y + 0.1, z)  # 151A st27/st28 search origin offset
+            targets = []
+            for target in self._enemies(mine.owner, candidates=candidates):
+                a, b = target.segment()
+                if (segment_distance(centre, a, b) <= projectiles.MINE_RADIUS + target.radius
+                        and capsule_visible(rays, centre, a, b, target.radius, category,
+                                            target_entity=target.entity)):
+                    targets.append(target)
+            if targets:
+                self.projectiles.remove_mine(mine)
+                for target in targets:
+                    self._damage(
+                        mine.owner, target, projectiles.MINE_DAMAGE, False, projectiles.MINE_LOADOUT,
+                        self.tick, world_tick=self.tick,
+                    )
 
     def heal_area(self, healer, centre, radius: float, amount: float) -> None:
         """Heal the healer and his teammates (everyone's own team in a free-for-all is his alone) whose body
@@ -1690,6 +1857,9 @@ class Combat:
         hit_tags: tuple[int, ...] = (),
         armour_scalar: float | None = None,
     ) -> None:
+        mine = target.owner if isinstance(target.owner, projectiles.Mine) else None
+        if mine is not None and self.projectiles.mines.get(mine.entity) is not mine:
+            return
         vitals = self.vitals_of(target)
         if vitals.dead or amount <= 0.0:
             return
@@ -1699,6 +1869,9 @@ class Combat:
             amount = component.world.outgoing_combat_damage(shooter.entity, amount, hit_tags)
         dealt = vitals.damage(amount, armour_scalar=armour_scalar)
         if dealt <= 0.0:
+            return
+        if mine is not None:
+            self.projectiles.mine_damaged(mine, vitals)
             return
         killed = vitals.pool_current(HEALTH_POOL) <= EPSILON
         if killed:
@@ -1712,6 +1885,7 @@ class Combat:
             flags = (CRITICAL if critical else 0) | (KILLING if killed else 0)
             self._tell_hit(shooter, target, dealt, flags, frame)
             shooter.stats.add(stats.HERO_DAMAGE, dealt)
+            self.match.queue_damage_dealt(shooter, target.entity, dealt, hit_tags)
             if award_ult:
                 if isinstance(target.owner, bots.Bot):
                     from ow174.game import mccree

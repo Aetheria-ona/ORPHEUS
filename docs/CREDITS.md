@@ -124,8 +124,59 @@ phase at `C31870`. The ordinary body direction queries use the mover pose throug
 The local 104319 export supplies graph `0DD8`'s target filter, cast profile,
 damage amount and loadout. The original client supplies the target query and
 array update at RVA `CAE3B0`, capsule overlap at `C8E660` and sight query at
-`CA3570`. The server reuses the sight query from the integrated communication
+`CA3570`. The frame gate at `CA9460` and tick at `C95590` supply the query
+cadence. The server reuses the sight query from the integrated communication
 wheel work and the existing ORPHEUS combat pipeline.
+
+The rank evaluator at RVA `1B77230` supplies the ordered target list.
+Graph `0E7D` supplies the target's velocity action, airborne movement modifiers
+and exit conditions. Delivery reuses the match's deferred body queue and the
+loaded PlayScript path.
+
+## Ability ground queries
+
+The 104319 RayCast state binds its outputs at RVA `8EC210` and updates them at
+`8EC270`. Its output accessor is at `C84580` and its end callback at `C841B0`.
+The target-build `002C.097` profile supplies the static category mask for
+Seismic Slam and Piledriver.
+
+The 104319 state-switch evaluator at RVA `1B9B531` supplies indexed cases used
+by Seismic Slam. The transition dependency path at `1B754D0` schedules the
+state check through `1B71220`. The first-person anchor evaluator at `D1AB95` uses the stance
+and mover spring. Doomfist's heights come from body `1235.003`. The static
+selector write at `CB76C7` identifies the world-point form of MoveTo.
+
+The local 104319 graph `0B27` supplies the close impact target and damage
+states. The timer schedule at RVA `8E5A90` and the lower-priority callback at
+`C880C0` inform the reconstructed server finish. The owner-relative centre
+transform at `C9AFB0` and visibility fallback at `CAF254` inform the shared
+capsule query.
+
+The 104319 Shockwave callbacks at `C92510` and `C95270` supply the initial
+and full-range samples. The query at `C99A80`, candidate filter at `CADA91`
+and ground checks at `C9C810` inform the static reconstruction. The ground
+support category comes from profile `0016.097`. The state writer at `C95C90`
+supplies the optional auxiliary-list layout. TrackTargets at `CAF449` reads
+the maximum result count from `m_C39691D9`.
+
+The 104319 `0B27` graph supplies the two landing effect actions at positions
+46 and 102. The short-action path at `A0CCA0` and `1B73B90` dispatches the
+effect callback at `97BF00`. The callback consults the client's predicted
+effect record at `A09910`.
+
+Airborne confirmation follows the 104319 selector's `8E92D2` gate,
+`C83C50` update cadence and `CB76C7` output assignments. The static
+reconstruction uses the `010C.097` category and the aim sweep and candidate
+checks at `C8EB30`, `CA0E50`, `C9E800` and `C9DA00`. The selector's
+wire byte is the latch reset at `8E8770`.
+
+## The Best Defense
+
+The local 104319 graph export supplies the damage-dealt listener in `0DDD`,
+the grant script `0DF3`, the named pool and its decay. The existing Summoner
+damage sender supplies the typed message precedent. Blizzard's October 2019
+notes record the normal 30-point grant.
+[Blizzard October 2019 patch notes](https://overwatch.blizzard.com/en-us/news/patch-notes/live/2019/10/)
 
 ## Wrecking Ball
 

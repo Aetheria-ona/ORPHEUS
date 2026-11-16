@@ -62,13 +62,15 @@ from ow174.game.mover import (
     Mover,
     MoverData,
     mover_data,
+    server_only_mods,
     statescript_mods,
     statescript_mover_data,
 )
 from ow174.game.projectiles import MAX_LEASE_FRAME
-from ow174.game.script import expr, graph, nodes, runtime, scene_host, spray_placement
+from ow174.game.script import expr, graph, nodes, play, runtime, scene_host, spray_placement
 from ow174.game.script.bot import BotScript
 from ow174.game.script.driver import (
+    DOOMFIST_PASSIVE_GRAPH,
     WHEEL_ACTION_CATEGORIES,
     WHEEL_ACTION_PREFIX,
     BodyScript,
@@ -192,6 +194,11 @@ class ShownController:
 
     def arrived(self, last: int) -> None:
         self.create_acked = True
+
+
+# Frames past the packet frame for the own body's create state: the client's command frames run at most 16
+# ahead of the packet frame (correction.py), so the state stays ahead of every frame it has predicted.
+CREATE_LEAD = 18
 
 
 class Player:
@@ -411,9 +418,17 @@ class Player:
         if self.body_script is not None:
             self.match.body_command(self, command, movement_end=movement_end)
             self.match.combat.command(self, command if posed else None)
+        self.track_body_modifiers(command.frame)
+
+    def track_body_modifiers(self, frame: int) -> None:
         # Modifier changes take effect on the next movement frame.
         script = self.body_script
-        self.mover.track_mods(statescript_mods(script.component) if script else {}, command.frame)
+        active = statescript_mods(script.component) if script else {}
+        self.mover.track_mods(active, frame)
+        if script is not None and (
+            server_only_mods(script.component, active) or correction.registration_view(script.component)
+        ):
+            correction.server_motion(self, frame)
 
     def new_body(self, entity: int) -> None:
         """Set up the allocated body at the spawn point."""
@@ -490,7 +505,9 @@ class Match:
         self.assemble_ends: float | None = None  # PvP: when "assemble your team" ends
         self.assembled = False
         self.players: list[Player] = []
-        self._body_messages: list[tuple[BodyScript, Player, BodyScript, int, dict]] = []
+        self._body_messages: list[
+            tuple[BodyScript, Player, BodyScript, int | play.Request, dict | None, int | None]
+        ] = []
         self.started = self.environment.wall_time(callsite="match.started")
         self.on_leave = on_leave  # called with each player who leaves
         self.ended = False
@@ -750,14 +767,21 @@ class Match:
         return player.spawned and player.has_body and player.client is not None
 
     def own_body_updates(self, viewer: Player) -> list[EntityUpdate]:
-        """The viewer's own body: its movement state rides in the create (at frame 0xFFFFFFFE) and in a
-        movement record at the packet frame."""
+        """The viewer's own body: its movement state rides in the create and in a movement record at the
+        packet frame. The client keeps every body's states, its own one's too, and takes a record only when
+        its frame is above the newest one kept, compared unsigned (0x7FF7896DA7D3..0x7FF7896DA7E7, before the
+        record goes on to component 59). While a STU_4773DA56 registration is on, it draws its own view from
+        those kept states (correction.registration_view). So the create's state must not sit at the create
+        path's default 0xFFFFFFFE, where no later record would ever get in and the view stayed at the spawn
+        pose. Nor at a frame the client already predicted: it then started its own body under the floor
+        until a record corrected it (live A/B, Practice Range). It goes CREATE_LEAD frames past the packet
+        frame, ahead of the client's newest command frame."""
         state = deepcopy(viewer.pose())
         create = EntityUpdate(viewer.body, OP_CREATE, movement=state)
         self.start_body_script(viewer, create)
         # The new script must exist before its projectile lease is captured. The create's
         # stream remains the native driver's arrival gate; only the payload is frozen here.
-        create.build = self._body_builder(viewer, state, own=True)
+        create.build = self._body_builder(viewer, state, own=True, lead=CREATE_LEAD)
         return [create]
 
     def _body_create(
@@ -765,8 +789,11 @@ class Match:
     ) -> world.RecordWriter:
         return self._body_builder(owner, state, own)(origin)
 
-    def _body_builder(self, owner: Player, state: Movement | None, own: bool = False):
-        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner."""
+    def _body_builder(
+        self, owner: Player, state: Movement | None, own: bool = False, lead: int | None = None
+    ):
+        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner.
+        `lead`: the movement state goes at the packet's tick plus `lead` (None: the create path's default)."""
         vitals = self.combat.vitals.get(owner.body)
         if vitals is None:
             health, armour, shields = pools.body_pools(owner.hero.guid)
@@ -784,6 +811,10 @@ class Match:
         components, state = deepcopy(components), deepcopy(state)
 
         def build(origin: int) -> world.RecordWriter:
+            frame_back = 1
+            if lead is not None:
+                frame = self.tick + lead
+                frame_back = (world.CREATE_BASE - frame) & 0xFFFFFFFF
             return world.create(
                 origin,
                 definition,
@@ -792,6 +823,7 @@ class Match:
                 position=position,
                 rotation=rotation,
                 movement=state,
+                frame_back=frame_back,
                 skin=skin,
             )
 
@@ -1189,13 +1221,17 @@ class Match:
 
     # --- the body's statescript (ow174/game/script) ------------------------------------------------
 
-    def _script_body_mover(self, entity: int, owner: int) -> Mover | None:
+    def _script_body_player(self, entity: int, owner: int) -> Player | None:
         """Resolve a live player body, including the owner during its own create."""
         for player in self.players:
             if (player.body == entity and player.has_body and player.client is not None
                     and (player.spawned or entity == owner)):
-                return player.mover
+                return player
         return None
+
+    def _script_body_mover(self, entity: int, owner: int) -> Mover | None:
+        player = self._script_body_player(entity, owner)
+        return player.mover if player is not None else None
 
     def script_body_position(self, entity: int, owner: int) -> expr.Vec3 | None:
         mover = self._script_body_mover(entity, owner)
@@ -1205,6 +1241,16 @@ class Match:
             if bot.entity == entity:
                 return expr.Vec3(*bot.position)
         return None
+
+    def script_body_eye_position(self, entity: int, owner: int) -> expr.Vec3 | None:
+        """The ordinary upright player's first-person stance anchor."""
+        player = self._script_body_player(entity, owner)
+        if player is None:
+            return None
+        mover = player.mover
+        x, y, z = mover.position
+        stance = expr.f32(combat.eye_height(player.hero.body, mover.crouched))
+        return expr.Vec3(x, expr.f32(y + expr.f32(stance + mover.spring)), z)
 
     def script_owner_movement_sample(self, owner: int) -> int | None:
         mover = self._script_body_mover(owner, owner)
@@ -1242,7 +1288,43 @@ class Match:
         shown = (player for player in self.players if player.body == entity and self._shown(player))
         return next(shown, None)
 
-    def queue_body_message(self, target: int, message: int, params: dict, sender: int) -> bool:
+    def script_hostile_body(self, owner: int, entity: int) -> bool:
+        source = self._message_player(owner)
+        if source is None or entity == owner or self.combat.is_dead(source):
+            return False
+        # A killing hit still has a recipient when the damage event is processed.
+        target = next((target for target in self.combat._targets() if target.entity == entity), None)
+        return target is not None and not self.combat._ally(source, target)
+
+    def queue_damage_dealt(self, shooter: Player, victim: int, amount: float, tags: tuple[int, ...]) -> None:
+        """Feed applied player damage into the supported authored passive listener."""
+        if not tags or shooter.hero.guid != 0x02E000000000012F or shooter.body_script is None:
+            return
+        passive = next((
+            instance for instance in shooter.body_script.component.instances.values()
+            if instance.graph.index == DOOMFIST_PASSIVE_GRAPH
+            and instance.initialized and not instance.stopped
+        ), None)
+        if passive is not None:
+            self.queue_body_message(shooter.body, 0x0240000000000012, {
+                0x13: amount,
+                0x15: expr.Entity(victim),
+                0x3D: tuple(expr.Asset(tag) for tag in tags),
+            }, shooter.body, target_instance=passive.id)
+
+    def queue_body_message(
+        self, target: int, message: int, params: dict, sender: int, *, target_instance: int | None = None,
+    ) -> bool:
+        return self._queue_body_delivery(target, sender, message, dict(params), target_instance)
+
+    def queue_body_play(self, sender: int, request: play.Request) -> None:
+        for entity in request.targets:
+            self._queue_body_delivery(entity, sender, request, None, None)
+
+    def _queue_body_delivery(
+        self, target: int, sender: int, message: int | play.Request, params: dict | None,
+        target_instance: int | None,
+    ) -> bool:
         """Capture the source and recipient scripts before either entity ID can be reused."""
         source, recipient = self._message_player(sender), self._message_player(target)
         if source is None or recipient is None:
@@ -1253,7 +1335,7 @@ class Match:
         if len(self._body_messages) >= MAX_BODY_MESSAGES:
             expr.warn_once("body-message-limit", "match body message queue reached %d", MAX_BODY_MESSAGES)
             return False
-        self._body_messages.append((source_script, recipient, script, message, dict(params)))
+        self._body_messages.append((source_script, recipient, script, message, params, target_instance))
         return True
 
     def deliver_body_messages(self) -> None:
@@ -1262,15 +1344,27 @@ class Match:
             return
         pending, self._body_messages = self._body_messages, []
         # Messages emitted by a receiver enter the next batch, outside its VM call stack.
-        for source, player, script, message, params in pending:
+        for source, player, script, message, params, target_instance in pending:
             if source.retired or source.component.fault is not None:
                 continue
             if player.body_script is not script or script.retired or not self._shown(player):
                 continue
             try:
                 component = script.component
+                if isinstance(message, play.Request):
+                    if not self.combat.is_dead(player) and script.world.submit_body_play(component, message):
+                        component.run_now()
+                        player.track_body_modifiers(script.frame)
+                    continue
                 # An earlier message can start or stop a later message's entry state.
-                if runtime.send_message(component, message, params, source.entity):
+                if target_instance is None:
+                    count = runtime.send_message(component, message, params, source.entity)
+                else:
+                    instance = component.instances.get(target_instance)
+                    count = 0 if instance is None else runtime.send_instance_message(
+                        instance, message, params, source.entity,
+                    )
+                if count:
                     component.run_now()
             except Exception:
                 log.exception("[game] %s: %s's body message handling failed", self.label(), player.name)

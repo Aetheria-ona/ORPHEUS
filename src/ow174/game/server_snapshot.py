@@ -40,7 +40,7 @@ from ow174.game.content import GameMap, Hero, Spawn
 from ow174.game.link import LinkCipher, ReceiveWindow
 from ow174.game.match import Match, Player, ShownController
 from ow174.game.mover import Mover, MoverData, loaded_mover_table
-from ow174.game.script import driver, expr, runtime
+from ow174.game.script import driver, expr, play, runtime
 from ow174.game.script.bot import BotScript, BotWorld
 from ow174.game.server import Client, GameServer, Handoff, _BotScriptDelivery
 from ow174.paths import ROOT
@@ -110,7 +110,7 @@ FIELDS = {
         "entity most now temporary_shields ids wave_health wave_health_id changed died_at death_tick killer"
     ),
     combat.WaveHealthPool: _names("capacity current"),
-    projectiles.Projectiles: _names("combat match shots observed next_field next_seen"),
+    projectiles.Projectiles: _names("combat match shots observed next_field next_seen next_mine mines"),
     projectiles.FieldArrived: _names("shot viewer stream done"),
     observers.Observers: _names("match watches"),
     observers.Watch: _names("body arrived stream sent next_lazy"),
@@ -169,9 +169,11 @@ OPTIONAL_FIELDS = {
 }
 DATACLASSES = (
     driver.WheelCallout, driver.WheelSprayEvent,
+    play.Resource, play.InvocationContext, play.Request,
     GameMap, Hero, Spawn, Handoff, LoadState, correction.SendToken, MoverData,
     heroselect.Controller, notices.Switch, combat.HitDef, combat.Target, combat.Rocket, combat.SplitVolley,
-    projectiles.Shot, projectiles.ShotRecord, projectiles._ObservedProjectile, projectiles._ProjectileArrival,
+    projectiles.Mine, projectiles.MineView, projectiles.Shot, projectiles.ShotRecord,
+    projectiles._ObservedProjectile, projectiles._ProjectileArrival,
     driver.Snapshot, driver.OwnerReport, statescript.Graph,
     statescript.Bool, statescript.Int, statescript.Float, statescript.Asset, statescript.Entity,
     statescript.Instance, statescript.Binding, statescript.StateWire, statescript.EventWire,

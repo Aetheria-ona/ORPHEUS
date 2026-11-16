@@ -10,7 +10,7 @@ import json
 import random
 
 from ow174.game import replay_values
-from ow174.game.script import expr, graph, message_receive, message_scope, nodes, runtime
+from ow174.game.script import expr, graph, grapple, message_receive, message_scope, nodes, runtime
 from ow174.game.script.bot import BotWorld
 from ow174.game.script.driver import BodyScript, BodyWorld, WheelCallout, WheelSprayEvent
 
@@ -75,16 +75,18 @@ _STATE_LAYOUTS = {
     nodes.AIFireWeapon: (("button_id",), ()),
     nodes.DisableLogicalButton: ((), ("button_id",)),
     nodes.Wait: ((), ("ms",)), nodes.WaitForServerFrames: ((), ()),
+    nodes.TimedGraphState: ((), ()), nodes.PlacementSelector: (("confirmed", "sampled"), ()),
     nodes.WaitFrames: (("target",), ()),
     nodes.ChaseVar: (("cur", "reached", "remaining", "last", "var", "interrupted"), ()),
     nodes.WeaponVolley: (
-        ("offset", "volleys", "per_shot", "ammo0", "rate", "spread0", "spread_ramp", "spread",
+        ("offset", "volleys", "per_shot", "ammo0", "ammo_sample", "rate", "spread0", "spread_ramp", "spread",
          "links", "reported"),
         ("max_shots", "min_shots"),
     ),
     nodes.OwnerMovementSample: (("sample", "outputs"), ()),
     nodes.MoveTo: (("movement",), ()),
-    nodes.RayCast: ((), ()),
+    nodes.RayCast: (("links", "values"), ()),
+    grapple.GrappleTrace: (("flight",), ()),
     nodes.Anim: ((), ("scalar_value",)),
     nodes.Ability: (("flags", "presses", "cur", "cooldown_rate", "last", "var", "stack_var"), ()),
     nodes.Defer: ((), ()), nodes.Watch: ((), ("seen",)), nodes.Switch: (("case",), ()),
@@ -98,7 +100,9 @@ _STATE_LAYOUTS = {
     nodes.SendGameMessageState: (("message_context", "message_frame", "message_sequence", "message_keys",
                                   "message_notified"), ()),
     nodes.CosmeticEntity: ((), ("var",)),
-    nodes.GamePadVibration: ((), ()), nodes.TrackTargets: (("count_var", "targets", "managed"), ()),
+    nodes.GamePadVibration: ((), ()),
+    nodes.TrackTargets: (("count_var", "targets", "managed", "checked_frame"), ()),
+    nodes.Shockwave: (("target", "managed"), ()),
     nodes.TargetEffects: (("children",), ()), nodes.Effect: ((), ()),
     nodes.ModifyHealth: (("last_applied", "hit_entities"), ()),
     nodes.SprayPlacement: (("placement",), ()),
