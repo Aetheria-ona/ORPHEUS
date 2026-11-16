@@ -1,282 +1,65 @@
-# Restoration roadmap
+# Restoration Roadmap
 
-The target is Overwatch 1 retail **1.74.0.0.104319**. Soldier: 76 and the Practice Range training bots form the first acceptance group. Record the source version and the smallest repeatable test for each claim. A milestone stays open until its stated exit criteria have been verified. The [verification record](STATE.md) and [changelog](../CHANGELOG.md) describe completed work and remaining limits. The [issue tracker](https://github.com/leafall903/ORPHEUS/issues) holds individual tasks.
+Target build: **Overwatch 1 retail 1.74.0.0.104319**.
+For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHANGELOG.md). For active tasks see [GitHub Issues](https://github.com/leafall903/ORPHEUS/issues).
 
-This branch starts from the community-maintained Python `main` and tracks Doomfist and Wrecking Ball restoration on `leafall`. The project-wide milestones below retain the shared requirements. Native server architecture and parity are tracked on the separate [Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust).
+---
 
-The [Python hero and PvE candidate record](HERO_SERVER_ACCEPTANCE.md) preserves the scope and
-verification reported by the contributor in PR #16. The changelog records integration checks on
-`leafall` separately from the candidate's original results.
+## Milestones
 
-## Doomfist acceptance
-
-- [ ] Hand Cannon. Verify pellet count and spread, direct hits and critical hits, distance falloff, ammo recovery, and owner and observer feedback. The server fires eleven projectiles in the authored 1/4/6 groups and applies distance falloff to each direct impact. Regressions cover retiring the old body's pellets on hero switching or leaving and preserving flight after death until body retirement. The exact launch angles, critical hits and client feedback still need verification.
-- [ ] Rocket Punch. Verify charge, cancellation, release, movement, target and wall impacts, knockback, damage, and recovery. The underlying statescript stack already has a regression for the previous charge fault.
-- [ ] Rising Uppercut and Seismic Slam. Verify activation, cooldown, grounded and airborne behavior, movement through shared collision, and target damage and displacement. Server regressions cover Uppercut's timed movement, three-frame target sampling, damage to ordinary targets and the player target's velocity reset and airborne input limits. Grounded Slam launches, lands and applies damage through the close sphere and forward shockwave. Airborne Slam confirms static ground through the shared collision scene and travels to its impact. Regressions cover empty-space cancellation, deduplication, static occlusion and discontinuous ground. Uppercut's dynamic visibility and launch impulse, Slam's dynamic targets, exact landing geometry and displacement, and original-client acceptance remain open.
-- [ ] The Best Defense and Meteor Strike. Verify shield grants, limits and decay, ultimate targeting and landing, damage and interruption. Server regressions cover Uppercut's shield grant, Hand Cannon exclusion, the authored ultimate-tag grant, the current shield cap, absorption, decay and body replacement. Meteor Strike gameplay, native shield capacity presentation and original-client acceptance remain open.
-- [ ] Presentation and lifecycle. Verify models, HUD, hit feedback, animations, sounds, death, respawn and hero switching. Seismic Slam's two landing effect actions have owner and observer wire regressions for initial delivery, loss, acknowledgement and late entry. Confirm playback and the listed behaviors with the original 104319 client in Practice Range and against a second player where applicable.
-
-## Wrecking Ball acceptance
-
-- [ ] Quad Cannons. Verify firing, spread, critical hits, falloff, magazine depletion, manual and automatic reload, and ammo while switching forms. Server regressions cover shot cone growth, held fire, torso damage, release, falloff, automatic and manual reload, and short Roll ammo retention and lockout. The owner reticle follows the authored spread ramp and decay. Original-client seed mapping, muzzle geometry and critical hits remain open.
-- [ ] Roll. Verify transformation in both directions, form speed, collision, weapon lockout, movement over ground and in air, and the owner and observer models. The server applies the authored ground movement profile on entry and restores the gun profile on exit.
-- [ ] Grappling Claw. Verify valid and invalid anchors, attachment, swing, release, cooldown, high-speed impacts, damage and knockback. Server tests cover hook travel to static walls, out-of-range misses, floor rejection, release and attachment timeout. Exact anchor filtering, retraction geometry, swing, impacts, cooldown and original-client acceptance remain open.
-- [ ] Piledriver. Verify altitude and ground checks, airborne activation, descent, landing, radial damage and displacement. Server tests cover near-ground rejection, windup, descent, landing, distance-based damage and ally, static occlusion and radius rejection. Player targets run the authored velocity reset and input limits, including grounded release, recasts and body replacement. The launch impulse, NPC target movement, dynamic visibility, impact presentation and original-client acceptance remain open.
-- [ ] Adaptive Shield. Verify the base grant and the contribution from nearby opponents, damage absorption, expiry, cooldown and shield HUD. Server regressions cover 100 base shield, 75 per nearby opponent, absorption, expiry and body retirement. Filter edge cases and original-client presentation remain open.
-- [ ] Minefield. Verify deployment, mine positions, arming, proximity triggers, damage, destructibility and expiry. Server tests cover three volleys, 15 landed mines, arming delay, damage with static occlusion, destruction, expiry and late observer health. The wire test checks both armed effect states after create acknowledgement and cancellation on removal. Exact flight and hit geometry, dynamic receivers, explosion and expiry effects and original-client acceptance remain open.
-- [ ] Lifecycle and presentation. Verify death, respawn, hero switching, repeated matches, HUD, animation, audio, and owner and observer updates in the original 104319 client.
-
-| Milestone | Exit criteria | Current evidence |
+| Milestone | Scope | Current Status |
 | --- | --- | --- |
-| M0 · Research and replay | Reproduce a known baseline with shared entity, time, input, event and state contracts. Track unsupported protocol and graph behavior. | Target build and sources are pinned. Controlled encrypted sessions and stored-state comparisons exist. Full coverage and reproducibility from public inputs remain open. |
-| M1 · Body and weapon initialization | Soldier: 76 keeps the expected model, weapon and ammo HUD for 60 seconds, with ten successful switch-and-return cycles and ten exits and rejoins. | Automated body, weapon and lifecycle scenarios pass. Encrypted startup tests cover ownership and controller initialization under loss. Original-client stability and presentation still need acceptance. |
-| M2 · Rifle and prediction | Hold and release fire, empty the magazine and reload repeatedly. Client ammo and effects agree with the server, including with lost and repeated input. | Selected shot, ammo, reload and loss scenarios have automated evidence. Original-client prediction and recovery still need verification. |
-| M3 · Single-player combat | Repeatedly hit, miss, kill and reset a training target. Its visible health, identity and combat feedback agree with the server. | Headless Practice Range scenarios cover damage, health, death and respawn. Encrypted replay verifies per-viewer nameplate ordering. Original-client HUD, names, kill feed and sound remain pending. |
-| M4 · Movement and two-client combat | Two clients agree on movement, line of sight, combat and respawn. Loss, delay and reordering recover without extra damage. | Collision-backed movement and selected two-peer protocol checks exist. Two-original-client agreement is pending. |
-| M5 · Match rules and heroes | Complete a full match in one mode on one map and return to the lobby. Verify the declared abilities for each supported hero. | Shared hero mechanisms and partial match flow exist. A fixed world-target movement control covers two authored ability graphs. Full ability target and speed resolution, timing and client acceptance remain open. |
-| M6 · Fidelity and reliability | Compare timing and behavior against versioned references. Verify long sessions, recovery, performance and repeatable deployment. | Server-only deployment with prepared data and selected replay and loss checks exist. Wider comparisons and end-to-end acceptance remain open. |
+| **M0 · Research & Replay** | Protocol specs, asset extractors, deterministic encrypted session replay | Target build pinned; v1/v2 controlled server journal & replay exist; external `.pb`/keys still local. |
+| **M1 · Body & Weapon Init** | Stable spawn, weapon/ammo HUD, 10x hero switch & rejoin | Headless loopback passes; 60s original-client Soldier stability pass pending (#3). |
+| **M2 · Rifle & Prediction** | Sustained firing, reload, lost-input command/ammo recovery | Server rifle/ammo/Sprint tests pass; client Sprint/fire desync investigation open (#4). |
+| **M3 · Single-Player Combat** | Hit/miss/kill/respawn, overhead HP, elimination banner & kill feed | Server combat/respawn works; bot HP bar (#7), kill feed name (#8), headshot sound (#9) open. |
+| **M4 · Two-Client Combat** | Synchronized movement, LOS, combat, and respawn across two clients | Collision movement & loopback checks pass; two-client original-client session pending. |
+| **M5 · Modes & Heroes** | Full match lifecycle, objectives, and abilities across supported heroes | Practice Range, Tutorial & 47 PvE cards enter cleanly; Doomfist/Wrecking Ball/McCree partial. |
+| **M6 · Reliability & Release** | Tick latency budgets, fault isolation, clean Windows deployment | Server-only startup & packet budget guards pass; multi-client latency measurements open. |
 
-## Project-wide checklist
+---
 
-- [ ] Integrate and reverify the individual hero lanes. The
-  [combined server acceptance matrix](HERO_SERVER_ACCEPTANCE.md) separates
-  verified partial handoffs, remaining implementation and original-client acceptance.
+## Hero Checklists
 
-- [ ] Verify the Rialto McCree PvE combat sandbox: manual five-enemy spawning,
-  navigation, acquisition, attacks and specials, bidirectional combat, skills and
-  ultimate, persistent corpses and requested console keys. Manual NPC lifetimes,
-  an external base-pool catalog and companion console/API are implemented.
-  Authored NPC weapon components are mounted; all five base definitions now
-  have scoped incoming-damage evidence in offline fixtures. Assassin requires
-  contact within3m; manual collision-aware pursuit now closes the default5m
-  spawn distance. Real NPC mover inputs and scoped navigation evidence are in
-  [NPC navigation](NPC_NAVIGATION.txt); full AI/map coverage remains open. See
-  [Assassin pin](ASSASSIN_PIN_BRIDGE.txt). Enforcer uses an explicitly declared manual
-  controller policy; see [Enforcer context](ENFORCER_MANUAL_CONTEXT.txt). Full enemy combat and browser/original-client
-  acceptance remain open.
-  McCree melee has player/NPC static-wall checks; see [McCree combat](MCCREE_COMBAT.txt)
-  for the partial attack frontier and open Flashbang/Deadeye requirements.
-  Scoped Fan scatter now affects damage rays;40 actual-five-NPC cases cover240
-  shots. All five console-spawned types also die through real Fan/reload input,
-  retain corpses/positions for300 frames and remove with minus. Seed identities
-  and mode binding are declared reconstructions; original-client agreement is open.
-  [Combat Roll](MCCREE_ROLL.txt) has scoped resource-driven physical movement
-  and buffered cooldown input checks; native phase/client equivalence remains open.
-  Resource-backed Flashbang control has offline interruption/recovery/lifetime
-  checks; native immunity/presentation and complete hero acceptance remain open.
-  Scoped authored launch bias/gravity and reconstructed range-end blast now
-  pass30 five-NPC flight cases; full native collision/expiry semantics stay open.
-  Native input joins now preserve Deadeye's six-second timing and secondary
-  cancellation; full ultimate and native-client acceptance remain open. See [state-input joins](STATE_INPUT_JOIN.txt).
-  A scoped per-target Deadeye bridge passes15 actual-input offline scenarios;
-  see [target bridge](DEADEYE_TARGET_BRIDGE.txt) for geometry, effect and native
-  acceptance limits. This does not complete the sandbox or hero checklist.
-  See [PvE combat sandbox](PVE_COMBAT_SANDBOX.txt).
-  - [ ] Verify each enemy's original-client health bar, contact sound and hit
-    reaction, continuous idle before and after nonlethal damage, and the
-    shooter's hit-indicator size. Record sound and animation playback
-    separately from health and hit-notice delivery.
-    The 1280x720 E4BA retest covers the idle intervals on all five bodies
-    after the server stopped repeating confirmed stationary movement. The
-    fixed-camera 3E3A capture shows intermediate hit-to-idle poses for all five.
-    Bone-level blend fidelity and a matched original PvE marker comparison
-    remain open. See [McCree combat](MCCREE_COMBAT.txt) for the rendered and audio evidence.
+### Soldier: 76 (Primary Baseline)
+- [x] **Server simulation:** body/weapon VM, rifle firing & reload, Sprint, Helix Rockets, Biotic Field, Practice Range bots.
+- [ ] **Original-client 60s verification ([#3](https://github.com/leafall903/ORPHEUS/issues/3)):** confirm weapon model, ammo HUD, Sprint, Helix, and Biotic Field across repeated switches/rejoins.
+- [ ] **Sprint/fire prediction ([#4](https://github.com/leafall903/ORPHEUS/issues/4)):** isolate client prediction desync when pressing/holding fire around Sprint.
 
-A checked item records evidence for that specific scope. Its parent remains open while other requirements are outstanding.
+### Doomfist
+- [ ] **Hand Cannon ([#5](https://github.com/leafall903/ORPHEUS/issues/5)):** server fires 11 pellets (`1/4/6`) with falloff, but Training Bot damage and firing sound on shots 2–4 failed in live client tests.
+- [ ] **Rocket Punch ([#36](https://github.com/leafall903/ORPHEUS/issues/36), [#47](https://github.com/leafall903/ORPHEUS/issues/47)):** dash movement, wall stop, charge-walk slow (`2.7–2.8 m/s`), and camera tracking verified in client; target knockback/damage, `STU_FBFF5DE7` wall impact, and 1P gauntlet spawn-anchor glitch (#47) remain open.
+- [ ] **Rising Uppercut ([#37](https://github.com/leafall903/ORPHEUS/issues/37)):** self-launch and PvP target reaction scripts work in tests; Training Bot knockup/damage and `STU_6FEE499E` remain open.
+- [ ] **Seismic Slam ([#6](https://github.com/leafall903/ORPHEUS/issues/6)):** grounded leap, airborne static collision placement, close sphere, forward shockwave, and landing effects implemented; full client retest on updated `main` pending.
+- [ ] **The Best Defense & Meteor Strike ([#38](https://github.com/leafall903/ORPHEUS/issues/38)):** passive shields (30/ability, 75/ult, cap 150, decay 3/s) implemented in tests; Meteor Strike early landing input (`0C51` unknown nodes) and impact audio/VFX remain open.
 
-- [ ] **Research and replay.** Rebuild required data from documented sources, resolve protocol and graph semantics, and reproduce complete sessions from recorded inputs and events.
-  - [x] Pin the target build and document upstream sources and data provenance.
-  - [x] Replay controlled encrypted server sessions and compare wire output and registered server state.
-- [ ] **Login, profiles and social features.** Complete authentication, account and profile state, progression, cosmetics, parties and other social features supported by the target build.
-- [ ] **Lobby and match lifecycle.** Verify queues, team assignment, game setup, hero selection, match handoff, joining, leaving, reconnecting and returning to the lobby.
-- [ ] **Network synchronization.** Verify authoritative movement, prediction and correction, input timing, and state consistency for players and observers under delay, loss, reordering and repeated connections.
-- [ ] **Heroes and abilities.** Cover weapons, reloads, aiming, movement abilities, passives, cooldowns, resources, ultimates, transformations and deployables with shared mechanics.
-- [ ] **Combat and health.** Reproduce hit detection, projectiles, explosions, damage, healing, armor, shields, barriers, status effects, eliminations, assists and respawns.
-  - [ ] Verify projectile and hitscan penetration by weapon and impact surface, including stacked targets, barriers and map geometry.
-- [ ] **Maps and world interactions.** Verify collision, movement surfaces, spawn rooms, doors, health packs, destructible objects and environmental deaths for applicable maps and modes.
-  - [x] Extract and integrity-check local collision caches for all 95 catalog maps and handle missing caches explicitly.
-  - [ ] Use the shared character collision system for player and bot bodies. Allies pass through each other and live opponents block movement. Verify player versus player, player versus bot and bot versus bot in both directions, including free-for-all, crouching, simultaneous movement, death and body replacement. Check the authored character-collision setting and its movement modifier separately from map barrier masks.
-  - [ ] Verify placement, team permissions, transitions and visible effects in authored spawn rooms. Reproduce out-of-bounds death and respawn on each applicable map.
-- [ ] **Modes and match rules.** Verify objectives, scoring, timers, overtime, round transitions, victory conditions and results across supported modes.
-  - [ ] Run Rialto Retribution story from start to extraction/results with authored cinematics and correct enemy AI. Placed mission graph roots/overrides enter isolated extraction. Native-backed ForCode, UUID/primary-possessor queries, PlayScript requests, type-list state lifecycle, numeric modifiers, auxiliary interfaces/effect routes and queued schema/start bindings have probes; original-client identities and possession updates agree. An explicit forward host records native scope history and runs the ordinary scope phase before deferred channel1. Actual0F45->0EC6 reaches frame500 with supplied services/clocks, including effect creation/retirement without injected callbacks. Full phase/clock mapping, rollback, orientation cleanup and engine consumers remain open. An explicit GameServer/Match factory now prepares 146 placed components plus mode100B in one shared research world, with live variables/messages and owned cleanup. It still stops strictly at D38D0035/node106 before later component execution. Native scene phases, full hosting/replication, cinematics and enemy AI remain unaccepted. See [Retribution restoration](RETRIBUTION_RESTORATION.txt).
-  - [ ] Create and host Rialto's selected gameplay script placements with definition defaults, matching instance overrides and replicated graph lifetimes. The normal catalog still omits all 123 nonempty placed script components. An explicit offline starter preserves native schema ordering and prepares graphs at the first update clock, backed by 108 schema and 36 initialization comparisons. Six native-backed literal config classes remove the selected schema stops: all 146 components configure in the isolated 371-create catalog, with 124 graphs and 542 queued writes. Of 123 nonempty components, 50 complete one frame and 73 retain strict faults: 66 require actual entity-control services, three require animation-alias components, one requires model-look scope registration, and three retain one action. DataFlowMapping matches 2070 original State/provider cases; both actual 0E61 components now allocate it and retain the later strict 0F647E55/node13 action before activation. Independent authored-node fixtures register/remove mapping061D, answer float1 and pass four codec checks. These fixtures do not establish completed component first frames or mission replication. Complete data-flow services remain open. The animation-alias State matches 966 native cases; all three actual 0D32 components complete frame0 with declared services and pass six on/diagnostic-off codec round trips. Two subsequent original-client matches verify native request rows, handles and current-alias selection/restoration for these three samples: 24 phase ACKs, six stream retirements, 24 native subject samples and 348 variable value/tag checks. Early off captures preserve pending engine selection until later reads settle. Visual animation playback, native true-mode timing and complete animation services remain open. The model-look State matches 4320 original scope/tick cases; actual 144E/node26 completes frame0 with explicit host/model services and passes 187/186-bit on/diagnostic-off codec checks, without a source override. Two subsequent original-client matches verify native scope registration/dispatch, model look override/restoration and look-stack rows for this exact sample: eight phase ACKs, two stream retirements, eight accepted captures, 28 variable checks and three on/off cycles. Fresh native identities reset counters. The inspector distinguishes nativeEntity+AC from networkEntity+B0; 17 earlier captures preserve the corrected inspector error. Visible appearance, complete engine services, phase/clock mapping and production hosting remain open. Two earlier client matches verify actual 0F65/120E frozen descriptors and eight initial values. Two later matches verify the actual 120E raw State2 sample: authored frame0 with declared server services and explicit observed source binding, diagnostic abort, eight phase ACKs after create ACKs and stream retirement. Read-only native State/model flags toggle and restore across three on/off cycles, including fresh entity/instance identities. Complete engine services and all-placement behavior remain unaccepted. An explicit Match factory now owns initial mode/placed startup, ordinary scheduling, live foreign-variable dependencies, queued messages and failure/leave/server-stop cleanup. The actual 371-create catalog prepares 147 components and retains rootD38/node106. Prepared entrance readiness stays blocked; shared-runtime storage export is unsupported. Entity-instance PlayScript caller/owner and builtin001B source cache now derive from live component bindings, backed by294 original getter/setter, seven allocation-source and seven owner-identity cases. New loaded-core instigators precede defaults and remain distinct from start-entry caller bindings. Explicit component queues now submit requests and preserve resource waits, policies, reverse flush and transient lifetimes, backed by277 original queue and2688 lifetime cases. Actual0F45/node48 creates0EC6 without a manual core handoff. Shared VoiceStimulus callbacks now begin caller40E05F6B/node39, allowing helper parameter41 before the controller-message component/node22 stop. A separate actual voice-state fixture now completes39->40/41->35->42 through unchanged plugs, with typed-array cleanup and no fault. Native973 voice and944 array comparisons pass with declared services/storage adapters, plus two explicit array-limit gates. Keyed storage, linked insertion/checkpoints, real voice services and the complete global poll driver remain open. Passive VM storage covers35 State models. Full startup, allocator/loader/deletion/phases and live transport remain open. Full entity script component definitions now survive extraction, including shared-schema graph references and empty000E defaults. An initial host API distinguishes unknown data from actual component absence. Actual000E/0F44 startup passes the declarative9D7 State. SetVar/SetVars now use the native value interface, collecting config arrays and preserving their different missing-pointer rules. The retained bundle has108 direct array assignments, including30 in the static Rialto closure;100 real configurations replay with explicit dynamic inputs. 216 native assignment cases and13 behavior tests cover value/guard/order distinctions. The ordinary controller keeps81A9AB10 strict: native PC loader/fallback and false-branch evidence do not establish its server meaning. Earlier explicit no-output/false/true fixtures reached common0C90 and retained1AAB4B4F before its iterator was implemented. Controller hero iteration now preserves scalar-first, collected-value and nested-group interfaces, order, dependencies and component ownership, backed by1296 original cases and21 behavior tests. Full native catalog/availability policies remain explicit unimplemented owner services. With declared inputs, three role profiles pass0C90/node55. The65ABFCCC team query now preserves two lookup passes, dependencies and signed team indices, backed by1600 native query and128 filter-decoder comparisons plus21 behavior tests. All three explicit profiles prepare0C90/node41 message06FF hero-list/team parameters and retain the unknown mode receiver; delivery is unaccepted. Strict outgoing message construction now preserves scalar success separately, generic targets, inherited/overridden source and ordered array parameters, backed by3456 original action comparisons and18 behavior tests. Parameter008D is corrected to tuple(0,). A subsequent native Entry backend preserves different instigators, repeated full-key parameters and transient builtin scopes, queues assignments before entries, and resolves source current possession through declared descriptors. It matches1350 original binding,3024 selection,15 scope and60 subject cases, with25 behavior tests. Actual named message entries now receive the native idle-transient retirement exemption, backed by2688 original lifetime comparisons. Actual100B's15 entries pass isolated pre-init queue fixtures without running ordinary mode initialization or entry plugs. A standalone persistent message-State manager now matches17920 original selection,17920 collection and3554 mutation comparisons, with19 behavior tests. The strict sending State now mounts the manager through explicit SceneWorld Contexts, with4626 native registration,396 initialization and16 timer comparisons;768 native writer and768 reader cases verify reply encoding.22 sender tests and two additional manager cleanup tests cover the integration.44 of47 actual sending nodes complete isolated pre-init registration across three declared role profiles; three nodes retain unknown queries. No authored plugs or ordinary initialization run in these fixtures. Native engine roles/frame/filter policy remain explicit. A sender-backed parameter scope and three-mode receiver cache backend now match936 and624 original cases, with26 behavior tests. The VM provider stack is shared across instances, preserves failed destinations and null barriers, and uses Source-instance/Receiver-watcher evaluation. Ordinary Entry scope regressions include24 cases with GUID0. The receiving State now mounts explicit contexts with native dual channels, epoch/tick selection, lazy getters, row-ID bindings, context outputs, subgraph transitions and codec. It matches3268 native control,1728 getter,1288 binding and360 variable resolver cases;4864 writer/4864 reader and256 binding-policy suffix cases pass, with24 behavior tests. All535 extracted receivers complete1605 isolated empty-source/pre-init role fixtures without authored plugs. Keyed type12/indexed paths, real engine roles/generation/filter policies, production mounting and original-client acceptance remain open. Full engine filters and native server forwarding remain open. The ordinary controller still keeps81A9AB10 strict. Config evaluation from node147 is verified without claiming its State lifecycle. Entity existence/current-possession queries now match1680 original instruction cases; with explicit query contexts and two declared controller/body objects it creates0C90 and1194 and retains81A9AB10/frame0. Known absent objects, missing components and no-output failure stay distinct; forward possession is not inferred from the reverse catalog. Two earlier read-only hero-switch captures agree with the current-object getter; no fresh client session is claimed for this query change. The failed bound receiver still rejects helper-message/node22. Five former placed9D7 stops complete their first frame. Two independent original-client matches accept the actual0F44/node33 common State allocation, three on/off cycles, unchanged typed variable940, fresh counters and retired bindings through an explicit owner-frame fixture. Complete controller execution is still open. A real Match prepares148 components/queues with one actual controller, retaining rootD38/node106 before controller execution. Native mode mounting and complete actor lifetimes remain open. Native scene phases, dynamic actor/controller/body lifetimes, full services/replication and mission execution remain open. See [Placed script initialization](PLACED_SCRIPT_INITIALIZATION.txt), [Entity-control State](ENTITY_CONTROL_STATE.txt), [Animation-alias State](ANIMATION_ALIAS_STATE.txt), [Model-look State](MODEL_LOOK_STATE.txt), [Data-flow mapping](DATA_FLOW_MAPPING.txt), [Shared scene host](SCENE_SCRIPT_HOST.txt), [PlayScript source context](PLAY_SOURCE_CONTEXT.txt), [PlayScript queue/lifetime](PLAY_SCRIPT_QUEUE.txt), [Shared voice stimulus](VOICE_STIMULUS_STATE.txt), [Native array actions](ARRAY_ACTIONS.txt), [Entity script component definitions](ENTITY_SCRIPT_COMPONENTS.txt), [Shared-variable State](SHARED_VARIABLE_STATE.txt), [Entity queries](ENTITY_QUERIES.txt), [Variable assignments](VARIABLE_ASSIGNMENTS.txt), [Controller hero iteration](CONTROLLER_HERO_ITERATION.txt), [Entity team query](ENTITY_TEAM_QUERY.txt), [Game-message action](GAME_MESSAGE_ACTION.txt), [Message reception](MESSAGE_RECEIVE.txt), [Persistent message manager](MESSAGE_MANAGER.txt) and [Sending message State](MESSAGE_SENDER.txt) and [Message parameter scopes/caches](MESSAGE_PARAMETERS.txt) and [Receiving message State](MESSAGE_RECEIVER.txt).
-  - [x] Restore and verify entry through all 47 Archives/Junkenstein difficulty and challenge cards. All cards passed original build-104319 client menu selection, load, hero selection, actual-world entry and settled-menu return. The final client completed 39 consecutive cards and closed normally. Accepted external inputs were promoted to the normal service with backups; native deployment smoke checks passed. See [PVE entrance acceptance](PVE_ENTRANCES.md). Mission AI, objectives, challenge effects, story hero restrictions and long-term stability remain outside this completed entrance scope.
-- [ ] **Bots and scripted scenarios.** Verify training and tutorial behavior, including target identity, routes, combat, spawning, death, respawn and resets.
-  - [x] Restore Tutorial entry with its authored solo red team and fixed Soldier: 76 controller, and verify actual-world entry and menu return. Five consecutive cycles and a subsequent Practice Range cycle passed in one original client; Tutorial and Practice Range also passed normal-service deployment smoke checks. Tutorial guidance and scripted progression remain open.
-- [ ] **Models, skins and animation.** Verify first- and third-person models, skins, weapon handling, aiming, ability animations, and spawn, death and respawn sequences.
-- [ ] **HUD, menus and visual feedback.** Verify health, ammo, overhead bars, reticles, hit markers, material-specific effects, elimination names, kill feed, on-fire meter, scoreboards and match screens.
-  - [ ] Restore and verify the C-key communication wheel and its submenus. The
-    authored 05AD and 02CF graphs now mount through the player body stream.
-    The emote graph chain reads untagged aliases and blend tree sets from
-    equipped unlocks. The 023A owner frame carries the selected blend tree.
-    The original client played Mercy's emote with corrected camera placement.
-    Offline owner frames keep Mercy's staff active through the Relax exit
-    and through Flurry and Caduceus. The user confirmed the correct weapon
-    model for 「放松」 and 「权舞风起」 in Practice Range.
-    Displacement-driven emotes remain open. Reproductions include Doomfist
-    (「有胆就来」), Bastion (「行尸走械」), and Mei (「僵尸跳」).
-    Emote cleanup releases the stack on a supplied finish or priority loss.
-    The emote VM follows authored loop and empty-alias timing and reads
-    prepared model durations for direct and nested records, including
-    inherited category matches. The local table covers all 284 untagged and
-    eight tagged equipped mappings across the three wheel categories.
-    The offline Heroic path finishes naturally, and Take a Knee reaches
-    the authored exit and cleans up on enabled primary fire. The same
-    held input leaves the loop active while blocked. D.Va's pilot applies
-    the tagged unlock fallback. The pilot uses its body tree to finish
-    the fallback animation. Nine command buttons and both movement axes
-    cancel the offline loop. Replays use both axes even without a mover
-    sample. An idle command cancels on leaving the floor. Native expression
-    cases verify the airborne gate and that Anim slot 2 is scalar. The
-    remaining logical buttons and animation-driven movement modifiers remain open.
-    Native probes verify the compiled scalar track layout, sampling
-    and missing-track zero. The animation extractor now exports
-    authored scalar tracks by blend tree, alias and category.
-    The wheel binds the known empty and single-key tracks to
-    023A Anim slot 2. For a float Anim output, authored node 78
-    clears horizontal velocity on the next static-support pose
-    and preserves the vertical component before integration.
-    All 292 configured tree/alias pairs resolve against 164
-    manifest-verified categories and category zero. Their curves
-    have zero or one key. Phase-dependent tracks outside this
-    catalog, moving supports and the general vector modifier
-    backend remain open.
-    An explicitly selected mech body with its prepared graphs uses its tagged
-    emote. Automatic form transitions, runtime tag changes, live model remaps
-    and original-client playback remain open.
-    The shared 0686 graph replicates fixed and configurable callout data,
-    original icon textures and the voice playback pulse for offline selections.
-    Native probes verify main menu defaults, per-hero and global override
-    precedence, and the three cosmetic slot tables. 0686 retires after the
-    authored wait so subsequent selections restart. A typed internal 02A3
-    category reaches both owner and observer gesture states. Primary fire
-    retires the gesture while the callout remains live. Natural completion
-    uses the two body-model aliases, extracted for 32 base bodies and the
-    D.Va mech. Three original-model offline fixtures exercise timer expiry.
-    The greeting follow-up now reads Ashe's authored source body tag.
-    The 0B9C branch identifies B.O.B. as a receiver. Its target query and
-    recipient lifecycle, live model overrides and client playback remain open.
-    The spray graph resolves the equipped unlock from the chosen slot.
-    The voice graph resolves the equipped .00D playback effect.
-    The optional player voice catalog sends stock callouts and equipped
-    lines through reliable voice notices. Offline checks cover Hello,
-    Acknowledge, Thanks, Need Healing and equipped slots. One 104319
-    session reported Mercy's equipped line 7E05.
-    Native probes verify the playback counter window and wrap.
-    Owner and observer frames now retain the slot and counter step
-    of each pending voice pulse until ACK. Delayed voice use
-    reports can also match a retained pulse sent to the owner.
-    The 21616 cosmetic-use report reaches the corresponding body instance.
-    Delayed spray use can match a recently transmitted placement
-    after a replacement or miss.
-    The body VM runs the inherited PC Action for unlock use. Native
-    probes verify its prediction record and empty rewind hook.
-    Separate server-only accounting remains unverified.
-    The spray graph resolves eligible surfaces in loaded static collision and
-    replicates the placement in owner and observer frames. Expanded ray caches
-    supply spray-only surfaces and mode props when prepared for the map.
-    Declared attachment poses produce local point and normal data for both streams.
-    Native ray dispatch, entity filtering and decal replacement are
-    verified with fixtures. A different equipped spray at identical
-    geometry sends a replacement in both streams. The general cleanup
-    sweeps retain wheel sprays, and keyed replacement and lifecycle cleanup
-    remove them. Attachment production and client-side cosmetic access remain open.
-    The 0686 localized and effect actions travel in owner and observer
-    deltas. Offline Need Healing and Group Up verify effect delivery
-    and its order relative to localized actions. Directed recipients
-    also receive their authored feedback action. Spray success and
-    failure send the corresponding 02CF effect actions. A lost delta
-    retains that action's slot, geometry and pulse until ACK.
-    Repeated ultimate status reports 89, 90 and 100 percent through the
-    same instance after its voice stack expires. Pending callouts on
-    that instance keep their original text and stamp across a new
-    selection. A lost packet retries the original percentage.
-    Each status also sends its authored effect after the localized
-    action. The legacy Symmetra 0169 receiver replicates
-    its teleporter status when 020F is explicitly selected and supplied with
-    its graphs and online state. Junkenstein checks 020F in legacy dialogue
-    branches. Its inspected boss spawn rows use hero 0016, whose catalog
-    body is 26F0. The original 020F creation path, teleporter creation and
-    other form-specific ultimate associations remain open.
-    All 20 directed 05AD messages reach an offline fixture's chosen body.
-    Live match poses now supply candidates to the two authored target states.
-    Authored eligibility gates route actions to the aimed teammate and use the
-    ordinary callout for enemies and free-for-all.
-    Acknowledge with no selected marker reaches the aimed teammate as 05AC.
-    The selected marker reaches the authored terminal action. The body
-    VM runs the verified inherited PC Action. A separate server-only
-    marker effect remains unverified.
-    Upright player targets use the native screen rectangle score with
-    server stance dimensions and command aim. Equal screen scores use
-    candidate root distance. The search origin rotates the authored
-    offset around the first-person pivot. Animated anchors, live pivot
-    inputs and special camera inputs still require a server binding.
-    Target visibility uses the rotated source offset and the native
-    lower-then-upper body ray fallback in expanded static geometry.
-    All 32 base models declare the primary sight anchor. Native probes
-    verify anchor compilation, parent-matrix transforms and ray order.
-    The wheel uses authored anchor order when the combat scene supplies
-    current parent matrices. Reference skeleton decoding and composition
-    with sampled local transforms are available. A decoded absolute clip
-    now supplies local samples to offline wheel rays. The extractor
-    exports deterministic clip GUIDs for the authored category branches.
-    The prepared local runtime includes 416 manifest-verified clips
-    and 32 base models. Default-path selections sample the active
-    023A primary clip at state time and restore the fallback on exit.
-    Runtime preparation carries all 449 indexed files. Body-keyed greeting
-    clip selection is exported for 33 bodies. Native probes verify that
-    model aliases send the two greeting tracks to slots 3 and 5. Their
-    pose weights, other animation layers and model replacement remain open.
-    The two inspected blend trees declare high-bit data-flow parameter
-    IDs. The local 104319 manifest has no .013 files for those IDs.
-    Forty-two native cases verify scoped parameter selection, remapping
-    and driver arithmetic. Twenty-two more verify row construction,
-    resolver precedence and model-to-query handoff. Twenty-three more
-    verify factory selection, initialization and builtin reads. Twenty
-    more verify scoped provider field selection, clamping and misses.
-    All 33 exported greeting bodies select the Biped3P updater in their
-    model tree sets. Twenty-eight native cases verify two of its field
-    writes and their scoped reads. The pitch input and B6 turn-filter
-    update are traced, with twelve more cases for filter reset and decay.
-    Twenty-one explicit turn-filter configurations run through the native
-    initializer. Omitted configs, active turn inputs and pose composition
-    remain open.
-    Both .097 profiles use mask 1FDF for static rays. A hit owned by the
-    candidate stays visible. Offline native probes distinguish the
-    profiles' dynamic rules, receiver overrides and shape-mask checks.
-    The actor category writer is verified with fixture shape inputs
-    and original holders from seven player and NPC models. The actor
-    decoder extracts 504 enabled bone-local shapes across all 32 base
-    player models. The wheel merges posed shape and static hits and
-    admits catalog base player shapes for both profiles. Native
-    probes cover missing receiver fallback and relation reference
-    transport. Both original nodes leave that reference empty.
-    Native probes also verify the empty-reference result for six
-    authored receivers and the 1000 shape category for ice-wall and
-    cryo models. The Reinhardt and Winston models use a separate
-    native geometry builder and resolve their mask selector at load.
-    Deployable shape registration, selector resolution, candidate-group
-    filtering and general pose coverage remain open. Stored server
-    snapshots include the wheel pose and shape admission callbacks.
-    Need Healing uses the authored source body tag in its targeting
-    and voice branches. Marker effects,
-    runtime tag mutations, dynamic target geometry and deployable eligibility
-    remain open.
-    The recipient graph sends the actions in order with each action's source.
-    Native fixtures verify the local entity check for directed chat and
-    the source and relation branches for other callouts.
-    The server accepts the original wheel's 21608 action GUID and flag and
-    delivers them to the sender's 02A3 graph entry. Acknowledge also
-    preserves the selected marker as parameter 0644. An offline packet
-    reaches the targeted node and executes the inherited action. The marker
-    presenters are authored client-only on entity and mode graphs.
-    All three wheel auxiliary entries and their exit lists target
-    client-only states. Client scope scheduling remains open.
-    The targeted marker effect, equipped-item playback, recipient rules
-    and original-client acceptance are still open. See [Communication wheel](COMMUNICATION_WHEEL.txt).
-- [ ] **Audio and dialogue.** Verify weapon, hit, critical-hit and death sounds, multikill and match announcements, ambient audio, music, contextual and randomized dialogue, and Easter eggs. Check listeners, timing and supported languages.
-- [ ] **Stability and delivery.** Verify tick and packet budgets, long-running matches, recovery, reproducible deployment, and final acceptance with the original client.
-  - [x] Verify server-only startup of the audited public source checkout using separate runtime data.
-  - [ ] Validate the local play setup on a clean Windows machine. Document how each authorized runtime input is prepared and track the inputs that still require separate preparation before game-folder-only setup is possible.
-  - [ ] Measure server tick tail latency, world packet gaps, delivered owner corrections, and original-client frame time during sustained fire. Repeat with two clients before widening the playtest scope.
-  - [ ] Compare first and repeated hero selections on the same map. Separate pick processing, body creation and binding, initial script delivery, and the original client's first playable frame.
+### Wrecking Ball
+- [ ] **Quad Cannons & Roll:** authored spread cone/decay, automatic reload on exit, and Roll speed/lockout transitions implemented offline; client acceptance pending.
+- [ ] **Grappling Claw:** static wall hook attachment and range/floor rejection implemented offline; swinging/retraction and high-speed collision open.
+- [ ] **Piledriver:** altitude check, windup/descent, tapered AoE damage (`100 -> 20`), and player reaction scripts implemented offline; NPC launch impulse and client acceptance pending.
+- [ ] **Adaptive Shield & Minefield:** `100 + 75 * nearby` temporary shield pools and 15-mine volley deployment/arming/proximity detonation implemented offline; client acceptance pending.
+
+### PvE Entrances & Hero Sandbox
+- [x] **Archives & Junkenstein Entrances (47/47 cards):** all 47 difficulty/challenge cards plus Tutorial and Practice Range load hero select, enter map, and return to menus cleanly on client 104319 ([PVE_ENTRANCES.md](PVE_ENTRANCES.md)).
+- [ ] **32-Hero Upstream Integration Candidate:** 32 hero deliveries exist on branch `codex/python-hero-upstream-20261113` (Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32)), documented in [HERO_SERVER_ACCEPTANCE.md](HERO_SERVER_ACCEPTANCE.md); remains separate from `main` pending conflict resolution and CI fixes.
+
+---
+
+## Core Subsystems
+
+- [ ] **Research & Data Preparation:** 95 catalog maps have extracted collision caches; external runtime bundle excludes raw game assets and private signing/content keys.
+- [ ] **Lobby, Accounts & Communication Wheel:** login, hero select, skin equip, persisted settings (`22200`–`22204`), equipped voice lines, sprays, and emotes (Mercy Relax/Flurry weapon & 3P camera verified on 104319; displacement emotes like 「有胆就来」 still need root-motion work).
+- [ ] **Network Synchronization:** reliable body creates/retirements, packet budget trimming, and uint32 command rollover guards pass headless loopback tests; preventing recycled body IDs from receiving stale combat notices (#12) remains open.
+- [ ] **Maps & Environment:** static collision caches built, but Practice Range out-of-bounds death plane / respawn (#13) and dynamic player-vs-player collision blocking remain open.
+- [ ] **HUD, Audio & Kill Feed:** enemy bot overhead HP bars (#7), localized bot names in kill feed (#8), headshot audio (#9), Athena multikill audio (#10), and bot death voice listeners (#11) remain open.
+
+---
+
+## Research Notes Index (Internal Protocol & Graph Docs)
+
+Detailed low-level RVA/STU notes in `docs/`:
+
+- **Rialto / Retribution / McCree:** [RETRIBUTION_RESTORATION.txt](RETRIBUTION_RESTORATION.txt) · [PVE_COMBAT_SANDBOX.txt](PVE_COMBAT_SANDBOX.txt) · [MCCREE_COMBAT.txt](MCCREE_COMBAT.txt) · [MCCREE_ROLL.txt](MCCREE_ROLL.txt) · [DEADEYE_TARGET_BRIDGE.txt](DEADEYE_TARGET_BRIDGE.txt) · [ASSASSIN_PIN_BRIDGE.txt](ASSASSIN_PIN_BRIDGE.txt) · [ENFORCER_MANUAL_CONTEXT.txt](ENFORCER_MANUAL_CONTEXT.txt) · [NPC_NAVIGATION.txt](NPC_NAVIGATION.txt)
+- **Communication Wheel & Animation:** [COMMUNICATION_WHEEL.txt](COMMUNICATION_WHEEL.txt) · [ANIMATION_ALIAS_STATE.txt](ANIMATION_ALIAS_STATE.txt) · [MODEL_LOOK_STATE.txt](MODEL_LOOK_STATE.txt) · [VOICE_STIMULUS_STATE.txt](VOICE_STIMULUS_STATE.txt) · [DATA_FLOW_MAPPING.txt](DATA_FLOW_MAPPING.txt)
+- **StateScript VM Internals:** [PLACED_SCRIPT_INITIALIZATION.txt](PLACED_SCRIPT_INITIALIZATION.txt) · [SCENE_SCRIPT_HOST.txt](SCENE_SCRIPT_HOST.txt) · [ENTITY_SCRIPT_COMPONENTS.txt](ENTITY_SCRIPT_COMPONENTS.txt) · [ENTITY_CONTROL_STATE.txt](ENTITY_CONTROL_STATE.txt) · [ENTITY_QUERIES.txt](ENTITY_QUERIES.txt) · [ENTITY_POSSESSION_QUERIES.txt](ENTITY_POSSESSION_QUERIES.txt) · [ENTITY_TEAM_QUERY.txt](ENTITY_TEAM_QUERY.txt) · [PLAY_SCRIPT_CORE.txt](PLAY_SCRIPT_CORE.txt) · [PLAY_SCRIPT_QUEUE.txt](PLAY_SCRIPT_QUEUE.txt) · [PLAY_SOURCE_CONTEXT.txt](PLAY_SOURCE_CONTEXT.txt) · [SHARED_VARIABLE_STATE.txt](SHARED_VARIABLE_STATE.txt) · [VARIABLE_ASSIGNMENTS.txt](VARIABLE_ASSIGNMENTS.txt) · [ARRAY_ACTIONS.txt](ARRAY_ACTIONS.txt) · [NUMERIC_MODIFIERS.txt](NUMERIC_MODIFIERS.txt) · [CONFIG_EVALUATION.txt](CONFIG_EVALUATION.txt) · [CONFIG_ARRAY_SELECTION.txt](CONFIG_ARRAY_SELECTION.txt) · [CONTROLLER_HERO_ITERATION.txt](CONTROLLER_HERO_ITERATION.txt) · [STATE_INPUT_JOIN.txt](STATE_INPUT_JOIN.txt) · [REGISTERED_STATES.txt](REGISTERED_STATES.txt) · [ORDINARY_SCOPE_PHASE.txt](ORDINARY_SCOPE_PHASE.txt) · [FOR_CODE_BINDINGS.txt](FOR_CODE_BINDINGS.txt)
+- **Messages, Effects & Replay:** [GAME_MESSAGE_ACTION.txt](GAME_MESSAGE_ACTION.txt) · [MESSAGE_MANAGER.txt](MESSAGE_MANAGER.txt) · [MESSAGE_PARAMETERS.txt](MESSAGE_PARAMETERS.txt) · [MESSAGE_RECEIVE.txt](MESSAGE_RECEIVE.txt) · [MESSAGE_RECEIVER.txt](MESSAGE_RECEIVER.txt) · [MESSAGE_SENDER.txt](MESSAGE_SENDER.txt) · [AUXILIARY_EFFECT_ALLOCATION.txt](AUXILIARY_EFFECT_ALLOCATION.txt) · [AUXILIARY_EFFECT_PARAMETERS.txt](AUXILIARY_EFFECT_PARAMETERS.txt) · [AUXILIARY_EFFECT_STATE.txt](AUXILIARY_EFFECT_STATE.txt) · [AUXILIARY_SCOPE_HISTORY.txt](AUXILIARY_SCOPE_HISTORY.txt) · [AUXILIARY_SUBGRAPHS.txt](AUXILIARY_SUBGRAPHS.txt) · [SIMULATION_CONTRACT.txt](SIMULATION_CONTRACT.txt) · [PACKET_BUDGET.txt](PACKET_BUDGET.txt)
