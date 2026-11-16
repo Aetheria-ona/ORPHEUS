@@ -109,6 +109,12 @@ A checked item records evidence for that specific scope. Its parent remains open
     authored 05AD and 02CF graphs now mount through the player body stream.
     The emote graph chain reads untagged aliases and blend tree sets from
     equipped unlocks. The 023A owner frame carries the selected blend tree.
+    The original client played Mercy's emote with corrected camera placement.
+    Offline owner frames keep Mercy's staff active through the Relax exit
+    and through Flurry and Caduceus. The user confirmed the correct weapon
+    model for 「放松」 and 「权舞风起」 in Practice Range.
+    Displacement-driven emotes remain open. Reproductions include Doomfist
+    (「有胆就来」), Bastion (「行尸走械」), and Mei (「僵尸跳」).
     Emote cleanup releases the stack on a supplied finish or priority loss.
     The emote VM follows authored loop and empty-alias timing and reads
     prepared model durations for direct and nested records, including

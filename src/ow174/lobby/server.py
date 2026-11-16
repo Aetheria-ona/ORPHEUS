@@ -229,6 +229,7 @@ class LobbyServer:
             self.settings.game_port,
             on_leave=self.game_left,
             skin_of=self.skin_of,
+            emote_unlocks_of=self.emote_unlocks_of,
             emote_aliases_of=self.emote_aliases_of,
             emote_blend_trees_of=self.emote_blend_trees_of,
             wheel_cosmetics_of=self.wheel_cosmetics_of,
@@ -251,6 +252,10 @@ class LobbyServer:
         skin = self.items.unlocks.get(loadout.get("+0x38") or 0)
         weapon = self.items.unlocks.get(loadout.get("+0x50") or 0)
         return (skin.skin_theme if skin else 0), bool(weapon and weapon.name == GOLDEN_WEAPON)
+
+    def emote_unlocks_of(self, account_lo: int, hero: int) -> tuple[int, ...]:
+        account = self.accounts.by_id(account_lo)
+        return () if account is None else self.content.collection.emote_unlocks(account.profile, hero)
 
     def emote_aliases_of(
         self, account_lo: int, hero: int, *, body_definition: int | None = None,
