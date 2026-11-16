@@ -1124,6 +1124,42 @@ class OwnerReport:
     sprays: frozenset[tuple[int, int, int]] = frozenset()  # instance, start, unlock
 
 
+def sent_links(var: runtime.Var) -> list[runtime.Link]:
+    """The links the client gets as the variable's bindings: active networked Stack entries."""
+    return [link for link in var.links if link.stack and link.state.active and link.state.networked]
+
+
+def sent_value(var: runtime.Var, links: list[runtime.Link] | None = None):
+    """The value to send with the variable's bindings. The client stores it as the variable's base and
+    resolves the bindings over it with its own copies of the bound states (read 0x7FF78991D2C0, store
+    0x7FF78AAB78A0, resolve 0x7FF78AAB70B0). A Stack whose value reads its own variable, as in an owner
+    slow `#23184 + 0.5`, would add again to a resolved base, so the base is the value below the lowest
+    such Stack. Every other binding replaces the base on the client, and the resolved value stays."""
+    links = sent_links(var) if links is None else links
+    below = next((link.state for link in links if _adds_to_own_output(link.state, var)), None)
+    return var.value() if below is None else var.value(below=below)
+
+
+def _adds_to_own_output(state: runtime.State, var: runtime.Var) -> bool:
+    """A bound Stack whose value expression reads the variable it outputs to."""
+    if not state.reads_below(var):
+        return False
+    target = state.node.field("m_out_Var")
+    if not isinstance(target, dict):
+        return False
+    return _reads_dynamic(state.node.field("m_value"), target.get("m_identifier"), target.get("m_60DB8F99"))
+
+
+def _reads_dynamic(cfg, identifier, scope) -> bool:
+    if isinstance(cfg, dict):
+        if cfg.get("$") == "STUConfigVarDynamic":
+            return cfg.get("m_identifier") == identifier and cfg.get("m_60DB8F99") == scope
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg.values())
+    if isinstance(cfg, list):
+        return any(_reads_dynamic(value, identifier, scope) for value in cfg)
+    return False
+
+
 def _same_var(a, b) -> bool:
     a = a or (None, ())
     b = b or (None, ())
@@ -1415,13 +1451,13 @@ class BodyScript(ReplicatedBody):
         return Snapshot(self.frame, callout=history[-1].serial, callouts=tuple(pending))
 
     def _add_var(self, snap: Snapshot, owner: int, var_id: int, var: runtime.Var) -> None:
+        links = sent_links(var)
         bindings = tuple(
             Binding(link.state.instance.id, link.state.index, link.slot, link.priority, link.above,
                     link.dynamic, link.frame_cached)
-            for link in var.links
-            if link.stack and link.state.active and link.state.networked
+            for link in links
         )
-        value = var.value()
+        value = sent_value(var, links)
         if value is not None or bindings:
             snap.vars[(owner, var_id)] = (value, bindings)
 
@@ -1593,7 +1629,7 @@ class BodyScript(ReplicatedBody):
             return False
         snapshot, _ = pending
         changed = any(
-            not expr.same(snapshot.vars.get((0, var), (None, ()))[0], self.component.vars[var].value())
+            not expr.same(snapshot.vars.get((0, var), (None, ()))[0], sent_value(self.component.vars[var]))
             for var in (HUD_HEALTH, HUD_MAX_HEALTH)
         )
         return changed and any(
