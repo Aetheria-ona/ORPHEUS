@@ -1,26 +1,27 @@
 # ORPHEUS
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) · [Discord](https://discord.gg/tqukqjAk7) · [Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust)
 
-[Discord](https://discord.gg/tqukqjAk7)
+ORPHEUS is an open-source server reimplementation for **Overwatch 1 (retail build 1.74.0.0.104319)** focused on research and preservation.
 
-ORPHEUS is an open-source server reimplementation for **Overwatch 1 retail 1.74.0.0.104319**. It is an independent, unofficial research and game preservation project. The long-term goal is to reproduce the server behavior and client-facing events for this build across its heroes, maps and modes. The server is still in development, with Soldier: 76 in the Practice Range as the first end-to-end target.
+- **`main` (this branch):** the Python reference server, Windows launcher scripts, data extraction tools, and synthetic/runtime test suites.
+- **`leafall`:** hero-ability development branch synced with `main`.
+- **`rust`:** the native Rust dedicated server (experimental, shares cross-language behavior contracts with `main`).
 
-[Test skills in the local Practice Range](#local-practice-range) · [Join an existing server](#join-an-existing-server)
+[Quick Start (Local Practice Range)](#local-practice-range) · [Join a Server](#join-a-server) · [Current Status](#current-status) · [Contributing](CONTRIBUTING.md) · [Open Issues](https://github.com/leafall903/ORPHEUS/issues)
 
-[Contribute](CONTRIBUTING.md) · [Roadmap](docs/ROADMAP.md) · [Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust) · [Verification record](docs/STATE.md) · [Changelog](CHANGELOG.md) · [Open issues](https://github.com/leafall903/ORPHEUS/issues)
+---
 
-## Run locally
+## Quick Start
 
-The `main` branch contains the community-maintained Python server and Windows launcher. Native server development continues on the separate `rust` branch.
+### Local Practice Range (Single-Player Testing)
 
-### Local Practice Range
+Requirements on Windows:
+1. 64-bit **Python 3.12**
+2. An authorized **1.74.0.0.104319** Overwatch installation
+3. A prepared `runtime-data/` pack (extracted game catalogs, scripts, descriptors, and `0688.col` map collision)
 
-Each tester runs ORPHEUS and the original client on the same Windows PC. Install 64-bit Python 3.12 and use your authorized **1.74.0.0.104319** installation and prepared Practice Range runtime. [Download the Python source ZIP](https://github.com/leafall903/ORPHEUS/archive/refs/heads/main.zip)
-
-#### Place and check the runtime
-
-Extract ORPHEUS and put the prepared pack under `runtime-data/` in the extracted checkout. Put `data/`, `bnet/` and `collision/` directly inside `runtime-data/`.
+Put your prepared pack under `runtime-data/` at the repo root (or set `ORPHEUS_RUNTIME_DIR`):
 
 ```text
 ORPHEUS/
@@ -31,99 +32,97 @@ ORPHEUS/
     collision/0688.col
 ```
 
-ORPHEUS detects this directory when it contains `manifest.json` or `data/`. An explicit `ORPHEUS_RUNTIME_DIR` takes precedence, and the legacy checkout layout remains the fallback. From the ORPHEUS directory, run the startup preflight. It lists missing startup inputs and checks the signing input length. Map collision is checked when a scene loads.
+Check that the pack is complete before launching:
 
 ```powershell
 .\scripts\START.bat --check-runtime
 ```
 
-#### Build the Windows relay once
-
-If you need a local `relay/owwfd_relay.dll` build, install the x64 MSVC Build Tools. Open the x64 Native Tools Command Prompt and run this from the ORPHEUS directory.
+Build the Windows client TLS relay DLL once (from an **x64 Native Tools Command Prompt** with MSVC Build Tools installed):
 
 ```bat
 .\relay\build.bat
 ```
 
-#### Launch the game and test a skill
-
-Pass the game installation directory or its `_retail_\Overwatch.exe` to the launcher. With no path argument, the launcher uses its saved client path or opens a file picker.
+Launch the local server and original client:
 
 ```powershell
 .\scripts\START_LOCAL.cmd --game-exe 'C:\path\to\Overwatch'
 ```
 
-The launcher creates a Python environment if needed and remembers the selected installation for future launches and collision preparation. Enter the Practice Range, pick the hero you are testing, and record the exact input and outcome for one skill at a time. [Original-client verification](CONTRIBUTING.md#original-client-verification)
-
-### Separate deployment data
-
-A complete authorized runtime includes protocol data, signing input, gameplay graphs and map collision. The runtime guide lists the source and preparation route for each required file. Preparing the entire runtime from a game folder alone remains open. [Runtime guide](data/README.md)
-
-- `tools/prepare_client_catalogs.py` generates four catalog JSON files locally from the target game installation with pinned DataTool. [Generate client catalogs](data/README.md#generate-client-catalogs)
-- `tools/prepare_server_runtime.py` assembles the runtime and writes a manifest. Optional game and DataTool arguments generate missing catalogs, gameplay data and map caches from local inputs. The remaining authorized files must be ready in the source checkout. [Generate missing data while packing](data/README.md#generate-missing-client-data-while-packing)
-
-For a new Practice Range pack in the default location, run this from the ORPHEUS directory with an authorized prepared source checkout.
+To run the backend server + web dashboard (`http://127.0.0.1:3725`) without launching a game client (also works on Linux/macOS):
 
 ```powershell
-py -3.12 -B tools/prepare_server_runtime.py --source 'C:\path\to\prepared-checkout' --destination .\runtime-data --map 0688
+.\scripts\START_SERVER_LOCAL.cmd
+# or via Python directly:
+python -m orpheus --mode server
 ```
 
-### Server-only checks
+### Join a Server
 
-With the runtime in place, run `scripts/START_SERVER_LOCAL.cmd` to start the loopback services and dashboard at `http://127.0.0.1:3725`. This entry needs the Python environment and prepared runtime.
-
-### Join an existing server
-
-On Windows, use the **1.74.0.0.104319** client and 64-bit Python 3.12. Ask the host for the address of their running, compatible ORPHEUS server. The host runs the service with its authorized runtime. The player launcher needs the game folder and host address and runs without a local server runtime or Windows relay.
-
-Open `scripts/JOIN_SERVER.cmd` from the same checkout. Enter the address as `host:port`, then select the client if prompted. You can also pass the address and game folder directly in PowerShell.
+No local `runtime-data/` or MSVC relay build is needed to join someone else's server in tournament mode:
 
 ```powershell
 .\scripts\JOIN_SERVER.cmd --server 'HOST:3724' --game-exe 'C:\path\to\Overwatch'
 ```
 
-The launcher requests the client's simpler tournament menu. Original-client verification is pending.
+For full-menu retail join (`--mode join`), see `python -m orpheus --help`.
 
-### Source-only checks
+### Running Public Tests (No Game Files Required)
 
-Use Windows with 64-bit Python 3.12. The source tests below use synthetic fixtures. Node.js 24 is used for the separate dashboard test.
+The public test suite uses synthetic fixtures only and runs on Windows, Linux, and macOS (clear `ORPHEUS_RUNTIME_DIR` to match CI):
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -B -m ruff check . --no-cache
 .\.venv\Scripts\python.exe -B -m unittest discover
+node --test tests/public/test_dashboard_client.mjs tests/public/test_npc_console_client.mjs
 ```
 
-Python discovery runs the public suite. See [contributor checks](CONTRIBUTING.md#public-source-checks) for the dashboard suite and the separate local runtime tests.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for running `tests/runtime/` against a local runtime pack and submitting pull requests.
 
-## Current status
+---
 
-| Area | Implemented and tested on the server | Evidence from the original client and remaining work |
+## Preparing Runtime Data
+
+If you already have a prepared local research directory, assemble a clean `runtime-data/` pack with:
+
+```powershell
+py -3.12 -B tools/prepare_server_runtime.py --source 'C:\path\to\prepared-checkout' --destination .\runtime-data --map 0688
+```
+
+See [data/README.md](data/README.md) for the full file checklist, DataTool catalog generation (`tools/prepare_client_catalogs.py`), optional emote/voice tables, and static ray caches.
+
+---
+
+## Current Status
+
+| Area | Server Implementation | Original-Client Status & Open Gaps |
 | --- | --- | --- |
-| Local login and lobby | Local authentication emulation, lobby, hero selection and match handoff. Automated checks cover handshake and server startup with prepared data. | Login, Practice Range loading and hero selection or switching have been observed. Broader lobby flows and match rules need verification. |
-| Soldier: 76 | Body and weapon state, movement and Sprint, rifle fire and reload, Helix Rockets and Biotic Field. Automated tests cover selected scenarios including repeated switching and rejoining, lost packets, and ammunition state. | The tester has fired on and killed training bots. Stable weapon presentation, ammunition HUD, input response and ability behavior still need a complete client pass. |
-| Practice Range combat | Hit and damage resolution, bot health, death and respawn, and replication of the original overhead health display graph for stock bots. Automated tests use controlled fixtures and prepared collision from the target map. | The tester has reported missing overhead health bars, unnamed eliminations, missing kill feed and missing headshot audio. The display graph change has wire evidence. Its rendering still needs a documented client result. |
-| Networking and research | Encrypted UDP, player input, entity lifecycles, server snapshots, replay and selected loss/reorder checks. | Client prediction, combat feedback, two-client agreement, longer sessions and broader map behavior remain open. |
-| Heroes, modes and audio | Shared systems and partial coverage exist. | Full hero abilities, objectives, match flow, hit and multikill feedback, and contextual voice playback are still in development. |
+| **Login, Profiles & Gallery** | Local Battle.net/lobby emulation, account profiles, persisted keybinds/settings (`22200`–`22204`), cosmetic loadouts, Hero Gallery previews. | Login, hero select, skin switching, and saved settings load cleanly in client 104319. Broader social/competitive rules remain WIP. |
+| **Soldier: 76 & Bots** | Full body/weapon VM, rifle firing & reload, Sprint, Helix Rockets, Biotic Field, Practice Range bot patrol, hit detection, and respawn. | Training bots can be damaged and killed; full 60s client acceptance, overhead bot health bars, bot names in kill feed (#8), and headshot audio (#9) remain open. |
+| **Doomfist & Wrecking Ball** | Shared StateScript updates synced from `leafall`: Seismic Slam (wave, placement, landing effects), Rocket Punch dash/view/charge walk, Uppercut reactions/shields, Grappling Claw, Quad Cannons, Piledriver, Adaptive Shield, Minefield. | Rocket Punch movement & charge walk verified in client; Doomfist target damage (#5, #36, #37), Meteor Strike early landing (#38), Slam retest (#6), and gauntlet view anchor (#47) remain open. |
+| **Communication Wheel & Voice** | Equipped emotes, 3rd-person camera & angle locks, Mercy staff/weapon selection, equipped voice lines & sprays. | Camera framing and Mercy Relax/Flurry weapon models confirmed in Practice Range. |
+| **PvE Entrances** | All 47 Archives and Junkenstein mode cards, Tutorial, and Practice Range loading. | All 47 cards enter and return to menus cleanly on client 104319. Live mission AI and objectives remain open. |
 
-An automated result covers the fixture or replay named in its evidence. A manual observation covers the build, commit and steps that were actually tried. No complete original-client acceptance pass has been recorded for the first target scenario. See the [verification record](docs/STATE.md) and [changelog](CHANGELOG.md).
+Detailed historical notes and exact test scopes live in [docs/ROADMAP.md](docs/ROADMAP.md), [docs/STATE.md](docs/STATE.md), and [CHANGELOG.md](CHANGELOG.md).
 
-## Get involved
+---
 
-- **Developers and AI-assisted contributors** can start with the public source tests. The guide covers Codex, Claude Code and the same review requirements for all submissions. [Contribution guide](CONTRIBUTING.md)
-- **Reverse engineers** can help pin a single field, state transition, event or timing rule to build 104319. Start with the relevant evidence and report uncertainty explicitly. [Research evidence](docs/RESEARCH_EVIDENCE.txt)
-- **Players** can run the local Practice Range and report a short, repeatable gameplay result. Reports of working behavior are welcome alongside bugs. [Gameplay verification](https://github.com/leafall903/ORPHEUS/issues/new?template=gameplay-verification.yml)
-- **New contributors** can look for tasks that use the public checkout and synthetic data. [Good first issues](https://github.com/leafall903/ORPHEUS/labels/good%20first%20issue)
+## Project Layout
 
-## Project layout
-
-| Path | Role |
+| Path | Purpose |
 | --- | --- |
-| `src/ow174/bnet`, `src/ow174/lobby` | Local login, accounts, social and lobby services, matchmaking and handoff |
-| `src/ow174/game`, `src/ow174/game/script` | Encrypted game transport, inputs, simulation, combat and statescript replication |
-| `src/ow174/dashboard`, `relay` | Local administration and the Windows client relay source |
-| `scripts`, `src/orpheus` | Windows launchers and the installed ORPHEUS entry point |
-| `tests/public`, `tests/runtime` | Public checks and prepared-runtime regressions |
-| `tools`, `docs` | Extraction and replay tools, research records and credits |
+| `src/ow174/bnet`, `src/ow174/lobby` | Battle.net RPC emulator, accounts, profiles, lobby handlers, matchmaking |
+| `src/ow174/game`, `src/ow174/game/script` | Encrypted UDP transport, movement/collision, combat, StateScript VM & replication |
+| `src/ow174/dashboard`, `src/orpheus` | Local admin dashboard and `orpheus` CLI entry point |
+| `relay/` | Windows C++ client relay DLL source |
+| `scripts/` | Windows launcher batch/cmd scripts |
+| `tools/` | DataTool/CASC extractors and `prepare_server_runtime.py` |
+| `fixtures/behavior/` | Language-neutral JSON behavior contracts shared with `rust` |
+| `tests/public/`, `tests/runtime/` | CI-safe synthetic tests (`tests/public`) and runtime-backed tests (`tests/runtime`) |
 
-The [roadmap](docs/ROADMAP.md) tracks the full build scope. [CREDITS.md](docs/CREDITS.md) records the original 1.74 lobby project, research sources and upstream authors. The public source retains the original [MIT license notice](LICENSE). Overwatch and its assets belong to their respective rights holders. Keep game clients, commercial assets, keys, private logs, raw captures and dumps out of public submissions.
+## License & Legal
+
+Code is published under the [MIT license](LICENSE); upstream acknowledgments are in [docs/CREDITS.md](docs/CREDITS.md). ORPHEUS is an unofficial research project. Never commit game binaries, Blizzard assets, signing keys, credentials, or raw packet captures.

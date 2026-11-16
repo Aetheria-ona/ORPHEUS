@@ -1,145 +1,56 @@
-# Shared behavior contracts
+# Shared Behavior Contracts
 
-Python behavior fixes should leave an executable contract that Rust can consume. Include a small fixture describing the changed input and expected result in behavior-changing pull requests. Use a synthetic case or material approved for publication. Pin the reference revision and state what the evidence establishes, including any original-client acceptance still pending.
+ORPHEUS uses small, language-neutral JSON fixtures under `fixtures/behavior/` so the **Python** server (`main`) and the **Rust** server (`rust`) stay aligned on byte-level protocol encoding, VM rules, and gameplay mechanics without sharing source files or shipping game assets.
 
-Backfill older behavior as it is investigated or changed. When a behavior needs restricted data or an unavailable client observation, record the reproduction, missing prerequisite and follow-up instead of inventing a public fixture or a passing result. A focused fix can proceed with its available regression and an explicit evidence gap.
+---
 
-## First contract
+## How It Works
 
-The [JAM framing fixture](../fixtures/behavior/jam-framing-v1.json) contains four synthetic payloads and their expected encrypted stream. Its key is the public byte sequence `00` through `1f`. The fixture comes from the pinned Python framing implementation and matches the pre-existing Rust framing vector. It establishes synthetic protocol agreement. Its original-client acceptance remains pending.
+1. Any Python fix or feature that changes wire bytes, state-machine lifecycle, or query rules should include a minimal synthetic JSON contract under `fixtures/behavior/<name>-v1.json`.
+2. Both Python and Rust run their real production code paths against the same fixture file:
+   - Python tests read `ORPHEUS_BEHAVIOR_FIXTURES` (defaulting to `fixtures/behavior/`).
+   - `rust`'s `shared-behavior-contracts` CI job checks out `main` alongside `rust` and runs `main`'s Python consumers against `rust`'s `fixtures/behavior/` directory so neither side can drift silently.
+3. Public fixtures must contain synthetic or approved inputs only—no copyrighted client assets, private keys, or full packet captures.
 
-The [Python contract test](../tests/public/test_behavior_contracts.py) calls the real `send_frame` and `FrameReader` APIs. It checks the expected ciphertext, every two-part fragmentation of the stream, and one-byte delivery. Run it from an installed development checkout.
-
-```powershell
-python -B -m unittest tests.public.test_behavior_contracts
-```
-
-Normal public test discovery also runs this contract. For cross-language checks, set `ORPHEUS_BEHAVIOR_FIXTURES` to the other checkout's `fixtures/behavior` directory so both consumers read the same file. Without that setting, the test uses this repository's fixtures. Record the exact Python and Rust revisions used for a comparison.
-
-## Seismic Slam lifecycle
-
-The [synthetic wave fixture](../fixtures/behavior/seismic-slam-wave-v1.json) checks
-that the immediate wave starts at zero reach, deduplicates candidate bodies,
-and gives its child state the full-range result before finishing. It pins the
-server VM baseline and the build 104319 graph and callback references. The
-Python test runs the state through the normal VM entry points.
-
-The [prepared-runtime regression](../tests/runtime/test_doomfist_slam.py)
-uses real command input and the locally prepared 104319 graph. It checks
-damage through the forward sector, static walls and ground gaps, and overlap
-with the close impact. Run it with the prepared runtime described in
-[CONTRIBUTING.md](../CONTRIBUTING.md#prepared-runtime-checks). The fixture
-covers lifecycle. Exact ground contacts, displacement, presentation and
-original-client acceptance need separate observations.
-
-The [airborne placement fixture](../fixtures/behavior/seismic-slam-placement-v1.json)
-checks an idle selector, a miss retaining its prior point, and a success that
-publishes the destination before MoveTo starts. The prepared runtime test
-walks off a ledge and presses E with the original graph. It covers travel to
-the lower floor, the impact hit, and cancellation over empty space. Client
-targeting preview and dynamic filters remain pending.
-
-## Body short actions
-
-The [short-action retry fixture](../fixtures/behavior/body-short-action-retry-v1.json)
-checks the owner and observer encodings using different authored index widths.
-It pins the frame bytes, the original action stamp across loss and retry, and
-the acknowledgement that retires the event. The prepared Seismic Slam test
-runs both landing effects through the body streams. Original-client rendering,
-audio and prediction recovery remain pending.
-
-## Server-only movement
-
-The [server-only movement fixture](../fixtures/behavior/server-only-movement-v1.json)
-checks how the channel 2 direction mod turns the throttles in six synthetic
-cases. It also checks the owner's record window around a server-only movement
-mod: records from the first moved frame through a 250 ms tail. It pins the
-104319 Rocket Punch dash (`0D06` state 42) and the client's throttle function.
-The [prepared-runtime regression](../tests/runtime/test_doomfist_rocket_punch.py)
-runs Rocket Punch with real command input for minimum and full charge, a
-turning view, cancellation and a wall. It also checks that the owner sees the
-dash's `STU_4773DA56` registration (`0D06` #138) and its child (#141) as on,
-as retail sends them, and gets its body's records from the charge on. While
-#138 is on, the original client draws the first-person view from the states it
-keeps of its body. Those take a record only when its frame is above the newest
-kept one, so the own body's create puts its state 18 frames past the packet
-frame, not at the create path's default `0xFFFFFFFE`. At a frame the client had
-already predicted, it started its own body under the floor.
-
-## Strict World queries
-
-The [World query fixture](../fixtures/behavior/world-queries-v1.json) records eleven synthetic cases: known origin and position, known unset, missing and populated foreign variables, unavailable position and foreign-variable services, and a null entity member read. Its pinned Python source establishes the strict host's query policy. It is not original-client evidence.
-
-The [Python consumer](../tests/public/test_world_query_contracts.py) creates a fresh production `Component(strict=True)` and graph instance for every case, then calls `instance.evaluate`. Its World adapter supplies only the fixture's positions and variable values. Missing positions return `None`; an unavailable entity-variable service returns `NotImplemented`, while a known variable table with a missing key returns `None`. The consumer checks fixed result types and values or the exact unsupported-query diagnostic, including its entity and variable identifier.
-
-```powershell
-$env:PYTHONPATH = 'src'
-python -S -B -m unittest tests.public.test_world_query_contracts
-```
-
-This source-only check needs neither installed dependencies nor prepared runtime data. It uses the same `ORPHEUS_BEHAVIOR_FIXTURES` override as the framing consumer. The contract covers query results and error categories only: Python's strict host faults and stops the component, while Rust records an expression issue and declines that evaluation. It does not establish equivalent component recovery, event order, live foreign-variable watchers or client behavior. Original-client acceptance remains pending.
-
-## Profile settings persistence
-
-The [profile settings fixture](../fixtures/behavior/profile-settings-v1.json)
-records synthetic client-to-lobby settings updates (`22200`–`22204`), saved
-`+0x130` keybind/value normalization (signed 32-bit key and 64-bit value
-bounds, last-write-wins merge), and the resulting outgoing `20802` payload.
-The [Python consumer](../tests/public/test_profile_settings_contracts.py) tests
-the production profile, lobby settings handler and player message paths using
-`ORPHEUS_BEHAVIOR_FIXTURES` without requiring prepared runtime data, and `rust`
-verifies the matching fixture in `rust/tests/profile_settings.rs`. Original-client
-acceptance remains pending.
-
-## Equipped player voice playback
-
-The [player voice fixture](../fixtures/behavior/player-voice-v1.json) specifies
-a synthetic hero voice catalog, trigger stimuli and expected friendly vs. hostile
-listener delivery (`PlayerVoiceTests` in
-[test_game_voicelines.py](../tests/runtime/test_game_voicelines.py)) using
-`ORPHEUS_BEHAVIOR_FIXTURES`. Running this consumer requires an authorized 104319
-runtime pack.
-
-## Communication-wheel emote presentation
-
-The [emote presentation fixture](../fixtures/behavior/wheel-emote-presentation-v1.json)
-uses a synthetic loadout. The [runtime consumer](../tests/runtime/test_communication_wheel.py)
-checks that the controller receives the selected hero's emote slots and the
-body create contains no equipment component. It decodes the selected resource
-and camera parameters from the owner frame and checks the mover's orientation
-before and after releasing the authored aim lock. The original client entered
-Practice Range and played Mercy's emote with the corrected camera placement.
-Live angle-lock coverage is pending.
-
-The [weapon fixture](../fixtures/behavior/wheel-emote-weapon-v1.json) runs Mercy's
-Relax, Flurry and Caduceus through the production wheel and weapon graphs with
-synthetic durations. It decodes the current weapon slot and checks that the
-staff is active during playback, including Relax's intro, loop and exit. It
-also checks emote retirement and a normal switch to the pistol afterward.
-The user confirmed the weapon model in build 104319 for 「放松」, including
-the stand-up animation, and 「权舞风起」 in Practice Range.
-
-## Fixture fields
+### Standard JSON Envelope
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | Version of this JSON contract format, initially `1` |
-| `case_id` | Stable identifier for the behavior and fixture revision |
-| `target_build` | Client build the project targets, currently `104319` |
-| `source` | Pinned source revision and the paths used to establish the expected result |
-| `evidence` | Evidence category, such as `synthetic-reference` for this case |
-| `client_acceptance` | Client observation status, including `pending` when no matching client result exists |
-| `input` | Explicit operation inputs, with byte arrays encoded as hexadecimal strings |
-| `expected` | Independently stored expected bytes, decoded events or registered state |
+| `schema_version` | Schema integer version (currently `1`) |
+| `case_id` | Stable semantic contract identifier |
+| `target_build` | Overwatch build (`104319`) |
+| `source` | Pinned commit/revision and code paths that generated the expected outputs |
+| `evidence` | Provenance category (`synthetic-reference`, `synthetic-strict-host-reference`, etc.) |
+| `client_acceptance` | Original-client observation status (`pending` or recorded session notes) |
+| `input` | Explicit inputs (byte arrays encoded as hex strings) |
+| `expected` | Expected output bytes, events, errors, or state snapshots |
 
-Keep each fixture tied to a concrete behavior. For time-dependent gameplay, also specify the initial state, simulation frames, seed, input order and packet-loss schedule that affect the result. Compare stable decoded fields when generated identifiers or cryptographic nonces vary. Keep tests on the normal implementation path and retain the fixed expected output when refactoring.
+---
 
-## Contribution checklist
+## Contracts on `main` (10 Fixtures)
 
-- State the behavior being changed and link the closest shared fixture or documented reproduction.
-- Record its reference revision, evidence category and expected result.
-- Run the affected implementation against that result and report any skips or failures.
-- Record client presentation, animation, audio and feel as separate observations when applicable.
-- Keep credentials, runtime game data, full captures and private paths in local storage. Share synthetic or approved fixtures with enough provenance to repeat the check.
+### Public CI Contracts (No Runtime Data Required)
 
-Use the [public source checks](../CONTRIBUTING.md#public-source-checks) for the Python lane and the [Rust parity checklist](https://github.com/leafall903/ORPHEUS/blob/rust/docs/RUST_PARITY.md) for migration acceptance.
+| Fixture | Scope & Behavior | Python Test | Rust Status |
+| --- | --- | --- | --- |
+| [jam-framing-v1.json](../fixtures/behavior/jam-framing-v1.json) | JAM stream framing encryption/decryption (`00..1f` key, all split boundaries & 1-byte delivery) | `tests.public.test_behavior_contracts` | Covered in CI (`orpheus-wire`) |
+| [world-queries-v1.json](../fixtures/behavior/world-queries-v1.json) | Strict VM World queries (`origin`, `position`, foreign vars, missing/null vs. unavailable host services) | `tests.public.test_world_query_contracts` | Covered in CI (`--test world_queries`) |
+| [profile-settings-v1.json](../fixtures/behavior/profile-settings-v1.json) | Client settings persistence (`22200`–`22204` $\rightarrow$ `+0x130` signed 32-bit keys / 64-bit values $\rightarrow$ `20802`) | `tests.public.test_profile_settings_contracts` | Covered in CI (`--test profile_settings`) |
+| [seismic-slam-wave-v1.json](../fixtures/behavior/seismic-slam-wave-v1.json) | Seismic Slam immediate wave reach sampling, target deduplication & child state delivery | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
+| [seismic-slam-placement-v1.json](../fixtures/behavior/seismic-slam-placement-v1.json) | Seismic Slam airborne selector: idle, miss retains prior point, success publishes before MoveTo | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
+| [body-short-action-retry-v1.json](../fixtures/behavior/body-short-action-retry-v1.json) | Owner & observer short frame-action encoding, retry with original stamp across loss, and ACK retirement | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
+| [server-only-movement-v1.json](../fixtures/behavior/server-only-movement-v1.json) | Channel-2 direction mod throttles (`0D06` Rocket Punch dash) & owner record window (+250 ms tail) | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
+
+Run all public contracts locally without runtime data:
+
+```powershell
+python -S -B -m unittest tests.public.test_behavior_contracts tests.public.test_world_query_contracts tests.public.test_profile_settings_contracts -v
+```
+
+### Runtime-Backed Contracts (Require Local 104319 Runtime Pack)
+
+| Fixture | Scope & Behavior | Python Runtime Consumer |
+| --- | --- | --- |
+| [wheel-emote-presentation-v1.json](../fixtures/behavior/wheel-emote-presentation-v1.json) | Equipped emote controller slots, owner `023A` resource/camera framing, and angle-lock lifecycle | `tests/runtime/test_communication_wheel.py` |
+| [wheel-emote-weapon-v1.json](../fixtures/behavior/wheel-emote-weapon-v1.json) | Mercy staff/pistol selection across Relax (intro/loop/exit), Flurry, and Caduceus | `tests/runtime/test_communication_wheel.py` |
+| [player-voice-v1.json](../fixtures/behavior/player-voice-v1.json) | Equipped hero voice-line lookup and friendly vs. hostile listener delivery | `tests/runtime/test_game_voicelines.py` |
