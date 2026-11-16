@@ -1,4 +1,5 @@
 import ctypes
+import sys
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -7,6 +8,7 @@ from ow174.launcher import npc_hotkeys
 
 
 class NpcHotkeyTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only Win32 keyboard hook test")
     def test_stop_key_is_captured_while_lobby_dispatch_is_busy(self):
         user32 = MagicMock()
         kernel32 = MagicMock()

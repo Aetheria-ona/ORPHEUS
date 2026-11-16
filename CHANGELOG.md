@@ -17,6 +17,27 @@ This log records tested changes and their acceptance status. Entries are grouped
 - The source-only publication branch passed Ruff, 921 public Python tests, six JavaScript tests, runtime preflight and a headless lobby, Battle.net RPC, game UDP and dashboard smoke test. Practice Range prepared collision and 15 bots from external runtime data.
 - Known limitation: displacement-driven emotes can move incorrectly. Follow-up examples are Doomfist (「有胆就来」), Bastion (「行尸走械」), and Mei (「僵尸跳」).
 
+### 2026-11-15
+
+#### Linux compatibility for the Python reference server and public tests
+
+- Deferred `ctypes.WinDLL("iphlpapi")` and `ctypes.WinDLL("kernel32")` loading in `ow174.launcher.connections` and `ow174.launcher.inject` behind `sys.platform == "win32"` lazy helpers so importing `ow174.cli` or running `--mode server` works on Linux.
+- Returned `None` from `connection_owner` on non-Windows platforms and skipped the Windows-only `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy` hook test outside `win32`.
+- Passed Ruff, 920 public Python tests (`1` skipped: `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy`), `ow174 --mode server` missing-runtime check without a prepared pack, and `tests.runtime.test_lobby_smoke` against a prepared runtime on Arch Linux (Python 3.14.8).
+
+#### Profile settings normalization and shared contract
+
+- Normalized `profile.settings["+0x130"]` compound keys (`+0x8`) as signed 32-bit integers and preserved 64-bit `+0x0` values in `Profile.from_dict` and `save_values` (22204), rejecting out-of-range or boolean values.
+- Documented full-block replacement for 22200–22203 and last-write-wins merge semantics for 22204, and added the synthetic `fixtures/behavior/profile-settings-v1.json` contract with `tests/public/test_profile_settings_contracts.py`.
+- Passed `tests/public/test_profile_settings_contracts.py` (2 tests) and `git diff --check`. Original-client acceptance remains pending.
+
+### 2026-11-13
+
+#### Catalog preparation runs DataTool from its own folder
+
+- `tools/prepare_client_catalogs.py` now starts DataTool in the DataTool folder. DataTool reads `Static/GUIDNames.csv` relative to the working directory, so a run from the repository root named no hero classes (`Class: null`) and the prepared hero catalog then failed lobby login in `content/career.py`. Started from its own folder, the generated hero, item and general unlock catalogs matched existing prepared copies exactly in a local 104319 check.
+- The public catalog test checks the working directory. Passed Ruff and the public Python tests.
+
 ### 2026-11-12
 
 #### Strict World query behavior contract

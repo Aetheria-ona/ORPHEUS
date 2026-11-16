@@ -4,20 +4,37 @@ on one PC apart by the connection each one makes."""
 import ctypes
 import ctypes.wintypes as wt
 import socket
+import sys
+import threading
 
 AF_INET = 2
 TCP_TABLE_OWNER_PID_ALL = 5
 
-iphlpapi = ctypes.WinDLL("iphlpapi")
-iphlpapi.GetExtendedTcpTable.restype = wt.DWORD
-iphlpapi.GetExtendedTcpTable.argtypes = [
-    ctypes.c_void_p,
-    ctypes.POINTER(wt.DWORD),
-    wt.BOOL,
-    wt.ULONG,
-    ctypes.c_int,
-    wt.ULONG,
-]
+iphlpapi = None
+_iphlpapi_lock = threading.RLock()
+
+
+def _iphlpapi():
+    global iphlpapi
+    if iphlpapi is not None:
+        return iphlpapi
+    with _iphlpapi_lock:
+        if iphlpapi is not None:
+            return iphlpapi
+        if sys.platform != "win32":
+            raise OSError("iphlpapi is only available on Windows")
+        dll = ctypes.WinDLL("iphlpapi")
+        dll.GetExtendedTcpTable.restype = wt.DWORD
+        dll.GetExtendedTcpTable.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(wt.DWORD),
+            wt.BOOL,
+            wt.ULONG,
+            ctypes.c_int,
+            wt.ULONG,
+        ]
+        iphlpapi = dll
+        return iphlpapi
 
 
 class TcpRow(ctypes.Structure):
@@ -35,10 +52,13 @@ class TcpRow(ctypes.Structure):
 
 def connection_owner(local_port: int, remote_port: int) -> int | None:
     """The PID of the process whose IPv4 TCP connection goes from local_port to remote_port."""
+    if sys.platform != "win32":
+        return None
+    dll = _iphlpapi()
     size = wt.DWORD(0)
-    iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+    dll.GetExtendedTcpTable(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
     buffer = ctypes.create_string_buffer(size.value)
-    if iphlpapi.GetExtendedTcpTable(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0):
+    if dll.GetExtendedTcpTable(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0):
         return None
     count = wt.DWORD.from_buffer(buffer).value
     rows = (TcpRow * count).from_buffer(buffer, ctypes.sizeof(wt.DWORD))

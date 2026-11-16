@@ -346,5 +346,19 @@ class RequirementsTests(TempDirTest):
             requirements.ensure_requirements(path)
 
 
+class NonWindowsGuardTest(unittest.TestCase):
+    def test_connection_owner_returns_none_and_kernel32_raises_oserror_off_windows(self):
+        from ow174.launcher import connections, inject
+
+        with (
+            patch.object(connections, "iphlpapi", None),
+            patch.object(inject, "k32", None),
+            patch.object(sys, "platform", "linux"),
+        ):
+            self.assertIsNone(connections.connection_owner(3724, 50000))
+            with self.assertRaisesRegex(OSError, "only available on Windows"):
+                inject._kernel32()
+
+
 if __name__ == "__main__":
     unittest.main()
