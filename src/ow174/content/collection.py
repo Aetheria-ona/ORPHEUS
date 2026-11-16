@@ -235,6 +235,14 @@ class Collection:
     ) -> tuple[int, ...]:
         return self._equipped_emote_assets(profile, hero, body_definition, blend=True)
 
+    def emote_unlocks(self, profile: Profile, hero: int) -> tuple[int, ...]:
+        equipped = self.loadout(profile, hero).get(LIST_SLOT_BY_TYPE["Emote"])
+        if not isinstance(equipped, list):
+            return ()
+        return tuple(
+            unlock if 0x0250000000000000 < unlock <= 0x0250FFFFFFFFFFFF else 0 for unlock in equipped[:4]
+        )
+
     def _equipped_emote_assets(
         self,
         profile: Profile,
@@ -243,12 +251,9 @@ class Collection:
         *,
         blend: bool,
     ) -> tuple[int, ...]:
-        equipped = self.loadout(profile, hero).get(LIST_SLOT_BY_TYPE["Emote"])
-        if not isinstance(equipped, list):
-            return ()
         assets = self.items.emote_blend_trees if blend else self.items.emote_aliases
         resolved = []
-        for unlock in equipped[:4]:
+        for unlock in self.emote_unlocks(profile, hero):
             tagged = self.items.tagged_emotes.get(unlock)
             if tagged is None:
                 resolved.append(assets.get(unlock, 0))

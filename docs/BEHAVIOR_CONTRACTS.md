@@ -29,6 +29,25 @@ python -S -B -m unittest tests.public.test_world_query_contracts
 
 This source-only check needs neither installed dependencies nor prepared runtime data. It uses the same `ORPHEUS_BEHAVIOR_FIXTURES` override as the framing consumer. The contract covers query results and error categories only: Python's strict host faults and stops the component, while Rust records an expression issue and declines that evaluation. It does not establish equivalent component recovery, event order, live foreign-variable watchers or client behavior. Original-client acceptance remains pending.
 
+## Communication-wheel emote presentation
+
+The [emote presentation fixture](../fixtures/behavior/wheel-emote-presentation-v1.json)
+uses a synthetic loadout. The [runtime consumer](../tests/runtime/test_communication_wheel.py)
+checks that the controller receives the selected hero's emote slots and the
+body create contains no equipment component. It decodes the selected resource
+and camera parameters from the owner frame and checks the mover's orientation
+before and after releasing the authored aim lock. The original client entered
+Practice Range and played Mercy's emote with the corrected camera placement.
+Live angle-lock coverage is pending.
+
+The [weapon fixture](../fixtures/behavior/wheel-emote-weapon-v1.json) runs Mercy's
+Relax, Flurry and Caduceus through the production wheel and weapon graphs with
+synthetic durations. It decodes the current weapon slot and checks that the
+staff is active during playback, including Relax's intro, loop and exit. It
+also checks emote retirement and a normal switch to the pistol afterward.
+The user confirmed the weapon model in build 104319 for 「放松」, including
+the stand-up animation, and 「权舞风起」 in Practice Range.
+
 ## Fixture fields
 
 | Field | Meaning |

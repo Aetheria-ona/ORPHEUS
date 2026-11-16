@@ -2,6 +2,22 @@
 
 The Python server targets Overwatch retail **1.74.0.0.104319**. A clean checkout supports the public source checks. Serving the original client requires a local runtime assembled from authorized inputs. See [separate deployment data](../README.md#separate-deployment-data).
 
+## Communication-wheel emote data
+
+Put `emote_aliases_174.json`, `emote_blend_trees_174.json`, `emote_tagged_174.json` and
+`emote_durations_174.json` in the active runtime's `data/` directory to resolve equipped
+emotes and advance their one-shot, intro and exit animations. The runtime packer also
+preserves `emote_clips_174.json` and `emote_scalar_tracks_174.json` when present.
+
+Export `.0A5`, `.021` and `.015` XML from the local 104319 installation with the pinned
+DataTool's `extract-stu-type --xml` mode. Run
+[the alias extractor](../tools/extract_emote_aliases.py) on the `.0A5` directory, passing
+`0407.003` and `040A.003` XML via `--body-definitions` for D.Va's tagged variants.
+Run [the duration extractor](../tools/extract_emote_durations.py) on the `.021`
+directory with `--categories` pointing to the `.015` directory. Its `--clips-output`
+and `--scalar-output` options write the two additional tables. Restart the server
+after installing the tables so it reloads the loadout mappings.
+
 ## Generate client catalogs
 
 The four catalog files can be generated from your authorized 104319 installation. Use the [pinned OWLib source](https://github.com/overtools/OWLib/tree/7afe5f52706e7002ed8c2717299cd60846f3fa3a) with its submodules and the x64 .NET 6 SDK.

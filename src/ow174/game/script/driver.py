@@ -133,6 +133,7 @@ ACTION_BUTTONS.update({action: 81 + action for action in range(10, 16)})  # 10..
 WEAPON_SLOTS, DEFAULT_SLOT, OWNER_HEALTH, HUD_HEALTH, HUD_MAX_HEALTH = 29, 16515, 253, 1732, 1737
 NOT_SENT = {OWNER_HEALTH}  # the client derives it itself (never sent)
 BODY_SCALE_OVERRIDE = 31210  # the common body graph's size modifier input
+WHEEL_EMOTE_CAMERA_DEFAULTS = frozenset((2286, 2287, 8435, 2296, 2914))
 # The world's config vars whose server answer is the client's for a human player's own body (computed, or
 # answered null/false). A BooleanSwitch that reads any other one is uncertain and is not sent.
 TRUSTED_NATIVES = {
@@ -360,6 +361,11 @@ class BodyWorld(runtime.World):
             return Vec3(f32(right * THROTTLE_UNIT), f32(forward * THROTTLE_UNIT), 0.0)
         if cls == "STU_37F20D24":  # GetGameMode: the match's mode (what component 114 announces)
             return Asset(self.mode)
+        if (cls == "STU_40AC5AE4" and self.communication_wheel and instance is not None
+                and instance.graph.index == 0x023A
+                and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
+            mover = self.match._script_body_mover(self.body, self.body) if self.match is not None else None
+            return f32(mover.pitch * (360 / 65536)) if mover is not None else 0.0
         if cls in {"STU_2200A66D", "STU_021D01CD", "STU_C8C4C20D"} and self.match is not None:
             entity = expr.to_entity(instance.evaluate(cfg.get("m_entity")))
             if expr.valid_entity(entity):
@@ -368,6 +374,10 @@ class BodyWorld(runtime.World):
                     if cls == "STU_C8C4C20D":
                         return f32(f32(math.atan2(facing.x, facing.z)) * 57.295780181884766)
                     return facing
+        if (cls == "STU_C8C4C20D" and self.communication_wheel and instance is not None
+                and instance.graph.index == 0x023A
+                and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
+            return 0.0  # Standalone replays have no live mover.
         if cls == "STU_FDBB0B67":  # entity size used by the authored movement and effect graphs
             target = cfg.get("m_entity")
             component = instance.component
@@ -409,7 +419,7 @@ class BodyWorld(runtime.World):
             if cls == "STU_3E7F59D8" and instance.graph.index in (0x05AD, 0x069A):
                 return self.wheel_slot(cfg, instance, WHEEL_EMOTE_ACTIONS)
             if cls == "STU_250DEABD" and instance.graph.index in (0x05AD, 0x023A):
-                # CD7490 reads the equipped slot from the target body.
+                # CD7490 resolves the equipment holder. The match has the body's selected loadout.
                 target = cfg.get("m_target")
                 if (isinstance(target, dict) and target.get("$") == "STU_33980609"
                         and instance.evaluate(target.get("m_entity")) == Entity(self.body)):
@@ -1474,6 +1484,13 @@ def create_initial_graphs(component: runtime.Component, record: dict) -> list[ru
         if definition is None:
             continue
         values = {}
+        if definition.index == 0x004B and getattr(component.world, "communication_wheel", False):
+            # The wheel forwards these root schema values through 05AD and 069A to the owner camera.
+            schema = definition.fields.get("m_publicSchema") or {}
+            for entry in schema.get("m_entries") or ():
+                var = expr.guid_of(entry.get("m_0D09D2D9")) & 0xFFFF
+                if var in WHEEL_EMOTE_CAMERA_DEFAULTS:
+                    values[(INSTANCE, var)] = expr.evaluate(entry.get("m_value"), expr.Context())
         for entry in item.get("m_1EB5A024") or ():
             var = expr.guid_of(entry.get("m_0D09D2D9")) & 0xFFFF
             values[(INSTANCE, var)] = expr.evaluate(entry.get("m_value"), expr.Context())

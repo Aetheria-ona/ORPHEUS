@@ -4,6 +4,19 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-16
+
+#### Communication-wheel emotes
+
+- Carry the authored 004B camera distance, offset and bone through to the 023A owner frame. Apply the emote's authored angle lock until its state ends. Regenerated the local D.Va target-tag table with the mech and pilot definitions.
+- The crash assertion identified component 65 as absent from Mercy's body. A read-only sample of a subsequent 104319 Practice Range match found component 65 on the player controller. Equipped unlocks now travel with the controller's possession update, including zeroes to clear stale slots on hero change. The body create retains its original component set.
+- Passed 78 communication-wheel, world and StateScript codec tests. After a local restart, the original client entered Practice Range and switched among Mercy, Widowmaker, Brigitte and Moira without another crash report. The user confirmed that Mercy's emote animation played, and reported that some emotes displayed the pistol where the staff was expected.
+- Check the body default first in the weapon manager's emote/death branch. Mercy's staff stays selected in the owner stream during Relax, including when she stands, and during Flurry and Caduceus. Ordinary weapon cycling still selects the pistol after cleanup. Passed 123 communication-wheel, world, StateScript codec and projectile tests, plus offline replays with the prepared 104319 animation durations. After the local restart, the user confirmed the correct weapon model in the original client for 「放松」 and 「权舞风起」 in Practice Range.
+- Restored the six missing emote tables in the local build-104319 runtime. Verified positive animation durations for all 292 equipped blend-tree and alias pairs across the default, intro and exit categories.
+- Replayed confirmed wheel selections through the production message handler and decoded the owner updates. Soldier: 76's Heroic completed at its authored duration. Take a Knee held the active state past the loop clip length and sent its exit and cleanup after primary fire. All 44 communication-wheel tests passed. The local server restarted and its lobby, game and dashboard endpoints are ready. The user confirmed the corrected third-person camera placement in the original client.
+- The source-only publication branch passed Ruff, 921 public Python tests, six JavaScript tests, runtime preflight and a headless lobby, Battle.net RPC, game UDP and dashboard smoke test. Practice Range prepared collision and 15 bots from external runtime data.
+- Known limitation: displacement-driven emotes can move incorrectly. Follow-up examples are Doomfist (「有胆就来」), Bastion (「行尸走械」), and Mei (「僵尸跳」).
+
 ### 2026-11-12
 
 #### Strict World query behavior contract
