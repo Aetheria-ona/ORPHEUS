@@ -2,8 +2,6 @@
 
 This summarizes what is verified on the Python server (`main`) against **Overwatch 1.74.0.0.104319**, separating automated headless tests from live original-client results. See [CHANGELOG.md](../CHANGELOG.md) for commit-by-commit details and [ROADMAP.md](ROADMAP.md) for open acceptance goals.
 
-*(Historical upstream notes at `9f8f3bcb` remain archived in [WIP.md](WIP.md).)*
-
 ---
 
 ## Live Original-Client Observations (1.74.0.0.104319)
@@ -11,7 +9,7 @@ This summarizes what is verified on the Python server (`main`) against **Overwat
 | Area | What Works in Live Client | Open / Failing in Live Client |
 | --- | --- | --- |
 | **Launcher & Login** | `_retail_\Overwatch.exe` logs in through the local Battle.net/TLS relay without official Battle.net, loads Practice Range (`0688`), switches heroes, and loads/saves settings (`+0x130`). | Broader multi-player internet latency and full competitive flow unverified. |
-| **PvE & Tutorial** | All 47 Archives/Junkenstein queue cards, Tutorial, and Practice Range enter hero select/world and return cleanly ([PVE_ENTRANCES.md](PVE_ENTRANCES.md)). | Live mission objectives and enemy AI remain open. |
+| **PvE & Tutorial Entrances** | All 47 Archives/Junkenstein queue cards (Uprising, Retribution, Storm Rising, Junkenstein, Challenges), Tutorial, and Practice Range enter hero select/world and return cleanly to menus (verified on 104319). | Live mission objectives, enemy AI, and challenge modifiers remain open. |
 | **Practice Range Combat** | Shooting kills training bots; damage (`25001`), eliminations (`25005`), bot death, and respawn events are sent and observed. | Overhead bot health bars (#7), bot names in kill feed/banner (#8), headshot SFX (#9), multikill audio (#10), and Practice Range boundary death (#13) remain open. |
 | **Doomfist (Practice Range)** | Rocket Punch charges, dashes (`~6.5 m` min / `~20 m` full), stops at walls, keeps direction while turning view, and walks while charging (`2.7–2.8 m/s`); view stays anchored above floor. | Target damage/knockback (#36), Hand Cannon bot damage & shots 2–4 audio (#5), Uppercut bot knockup (#37), Meteor Strike early landing (#38), Slam live retest (#6), and 1P gauntlet offset (#47). |
 | **Communication Wheel** | Mercy「放松」and「权舞风起」display correct weapon models and 3P camera framing; equipped voice lines (`Hello`, `Thanks`, `Need Healing`, `7E05`) play. | Displacement-driven emotes (Doomfist「有胆就来」, Bastion「行尸走械」, Mei「僵尸跳」). |

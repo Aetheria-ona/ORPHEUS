@@ -40,8 +40,8 @@ For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHAN
 - [ ] **Adaptive Shield & Minefield:** `100 + 75 * nearby` temporary shield pools and 15-mine volley deployment/arming/proximity detonation implemented offline; client acceptance pending.
 
 ### PvE Entrances & Hero Sandbox
-- [x] **Archives & Junkenstein Entrances (47/47 cards):** all 47 difficulty/challenge cards plus Tutorial and Practice Range load hero select, enter map, and return to menus cleanly on client 104319 ([PVE_ENTRANCES.md](PVE_ENTRANCES.md)).
-- [ ] **32-Hero Upstream Integration Candidate:** 32 hero deliveries exist on branch `codex/python-hero-upstream-20261113` (Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32)), documented in [HERO_SERVER_ACCEPTANCE.md](HERO_SERVER_ACCEPTANCE.md); remains separate from `main` pending conflict resolution and CI fixes.
+- [x] **Archives & Junkenstein Entrances (47/47 cards):** all 47 difficulty/challenge cards plus Tutorial and Practice Range load hero select, enter map, and return to menus cleanly on client 104319.
+- [ ] **32-Hero Upstream Integration Candidate:** 32 hero deliveries (including scoped Rialto/McCree, Ana, Mei, Winston, Pharah, and Genji work from PR [#16](https://github.com/leafall903/ORPHEUS/pull/16)) exist on branch `codex/python-hero-upstream-20261113` (Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32)); remains separate from `main` pending conflict resolution and CI fixes.
 
 ---
 
