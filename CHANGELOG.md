@@ -29,6 +29,69 @@ This log records tested changes and their acceptance status. Entries are grouped
   corrections. A minimum punch still dashes about 6.5 m and a full one about
   20 m.
 
+#### Own body spawn under the floor
+
+- Put the own body's create movement state 18 frames past the packet frame
+  (`match.CREATE_LEAD`), not at the create's tick. At the create's tick, a frame
+  the original client had already predicted, it started its own body under the
+  floor until a record corrected it (the first Rocket Punch for Doomfist).
+  Soldier: 76, which gets a record every frame, was corrected at once.
+- Live A/B run with the original client on the Practice Range, alternating per
+  spawn of each hero: the only spawn under the floor was a Doomfist spawn with
+  the create's tick. Both Doomfist spawns and the Soldier: 76 spawn with the
+  lead were on the floor, and their punches showed no flash at the start.
+- The prepared-runtime create test now expects the lead and checks that a
+  later resend stays ahead.
+
+#### Rocket Punch start flash
+
+- Put the own body's create movement state at a real frame (now 18 frames past
+  the packet frame; see above), not at the create path's default `0xFFFFFFFE`.
+  The original client keeps every body's
+  movement states, its own one's too, and takes a record only when its frame is
+  above the newest kept one, compared unsigned (client RVA `7CA7D3`..`7CA7E7`,
+  before the record goes on to component 59). At `0xFFFFFFFE` the own body's
+  kept state stayed the spawn pose for good.
+- While Rocket Punch's `STU_4773DA56` registration (`0D06` #138) is on, the
+  client draws the first-person view from those kept states. It turns #138 on
+  by itself at the release, before the server's frame, so the view flashed to
+  the spawn pose at the start of every dash. Send the owner its body's records
+  from the charge (`0D06` ChaseVar #23, at least 0.2 s before the dash) and
+  while a `STU_4773DA56` registration is on.
+- Send #138 and its child #141 to the owner as on again, as retail does. This
+  replaces the "Rocket Punch view" withholding below.
+- Live A/B run with the original client on the Practice Range, with both
+  changes above, standing still while charging: 22 punches in blocks of six,
+  with #138 withheld or sent, full charge and taps. No flash at the start, and
+  the view stayed on the body through every dash. Nothing else odd was seen.
+- Tests: public `registration_view` window checks, the own create's frame in
+  `test_game_entity_lifecycle.py`, and the Rocket Punch runtime regressions now
+  expect records from the charge and #138 sent.
+
+#### Rocket Punch view
+
+- Leave Rocket Punch's `STU_4773DA56` registration (`0D06` #138, under the
+  dash's Stack #22) and its child `STU_D09BD154` (#141) out of the owner's
+  frames. The server still runs both. While the original client has #138 on,
+  it draws the first-person view at a fixed spot below the Practice Range
+  spawn room, wherever the body is, for the whole dash. Which client data puts
+  it there is unknown: the registration's code past its component lookup is
+  obfuscated. Roadhog's hook victim (`01C9` #22) and `007D` #7 use the same
+  class and are unchanged and untested.
+- Live A/B runs with the original client (three punches per variant): with
+  #138 left out the view follows the dash. Leaving out only #141, or sending
+  the aim lock #81, did not help. Away from spawn, the view jumped back below
+  the spawn room.
+- Add a public test for the withheld states and a prepared-runtime check that
+  the owner's frames leave out #138 and #141 for the whole dash while the
+  server keeps them on.
+- Original client with this change, full charge and minimum charge: the view
+  stays on the body and the dash can be seen. Still open: a brief flash below
+  the spawn area right at the start of the dash (likely the client predicting
+  #138 until the next server frame) and the gauntlet sitting slightly left
+  during the dash. Passed Ruff, 943 public Python tests, both Node suites and
+  the five Rocket Punch runtime tests.
+
 #### Rocket Punch dash
 
 - Send the owner its body's movement records while a mod of a server-only

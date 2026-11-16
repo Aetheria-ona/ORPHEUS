@@ -196,6 +196,11 @@ class ShownController:
         self.create_acked = True
 
 
+# Frames past the packet frame for the own body's create state: the client's command frames run at most 16
+# ahead of the packet frame (correction.py), so the state stays ahead of every frame it has predicted.
+CREATE_LEAD = 18
+
+
 class Player:
     def __init__(
         self,
@@ -412,7 +417,9 @@ class Player:
         script = self.body_script
         active = statescript_mods(script.component) if script else {}
         self.mover.track_mods(active, frame)
-        if script is not None and server_only_mods(script.component, active):
+        if script is not None and (
+            server_only_mods(script.component, active) or correction.registration_view(script.component)
+        ):
             correction.server_motion(self, frame)
 
     def new_body(self, entity: int) -> None:
@@ -750,14 +757,21 @@ class Match:
         return player.spawned and player.has_body and player.client is not None
 
     def own_body_updates(self, viewer: Player) -> list[EntityUpdate]:
-        """The viewer's own body: its movement state rides in the create (at frame 0xFFFFFFFE) and in a
-        movement record at the packet frame."""
+        """The viewer's own body: its movement state rides in the create and in a movement record at the
+        packet frame. The client keeps every body's states, its own one's too, and takes a record only when
+        its frame is above the newest one kept, compared unsigned (0x7FF7896DA7D3..0x7FF7896DA7E7, before the
+        record goes on to component 59). While a STU_4773DA56 registration is on, it draws its own view from
+        those kept states (correction.registration_view). So the create's state must not sit at the create
+        path's default 0xFFFFFFFE, where no later record would ever get in and the view stayed at the spawn
+        pose. Nor at a frame the client already predicted: it then started its own body under the floor
+        until a record corrected it (live A/B, Practice Range). It goes CREATE_LEAD frames past the packet
+        frame, ahead of the client's newest command frame."""
         state = deepcopy(viewer.pose())
         create = EntityUpdate(viewer.body, OP_CREATE, movement=state)
         self.start_body_script(viewer, create)
         # The new script must exist before its projectile lease is captured. The create's
         # stream remains the native driver's arrival gate; only the payload is frozen here.
-        create.build = self._body_builder(viewer, state, own=True)
+        create.build = self._body_builder(viewer, state, own=True, lead=CREATE_LEAD)
         return [create]
 
     def _body_create(
@@ -765,8 +779,11 @@ class Match:
     ) -> world.RecordWriter:
         return self._body_builder(owner, state, own)(origin)
 
-    def _body_builder(self, owner: Player, state: Movement | None, own: bool = False):
-        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner."""
+    def _body_builder(
+        self, owner: Player, state: Movement | None, own: bool = False, lead: int | None = None
+    ):
+        """Freeze a player's current health pools, team and hero, with the projectile lease for its owner.
+        `lead`: the movement state goes at the packet's tick plus `lead` (None: the create path's default)."""
         vitals = self.combat.vitals.get(owner.body)
         if vitals is None:
             health, armour, shields = pools.body_pools(owner.hero.guid)
@@ -784,6 +801,10 @@ class Match:
         components, state = deepcopy(components), deepcopy(state)
 
         def build(origin: int) -> world.RecordWriter:
+            frame_back = 1
+            if lead is not None:
+                frame = self.tick + lead
+                frame_back = (world.CREATE_BASE - frame) & 0xFFFFFFFF
             return world.create(
                 origin,
                 definition,
@@ -792,6 +813,7 @@ class Match:
                 position=position,
                 rotation=rotation,
                 movement=state,
+                frame_back=frame_back,
                 skin=skin,
             )
 
