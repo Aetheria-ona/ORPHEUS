@@ -5,10 +5,14 @@ import ctypes
 import ctypes.wintypes as wt
 import os
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
-k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+k32 = None
+_k32_lock = threading.RLock()
+
 PROCESS_INJECT = 0x0002 | 0x0008 | 0x0010 | 0x0020 | 0x0400
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SYNCHRONIZE = 0x00100000
@@ -32,45 +36,72 @@ class ModuleEntry(ctypes.Structure):
     ]
 
 
-def _declare(name, restype, *argtypes):
-    fn = getattr(k32, name)
-    fn.restype, fn.argtypes = restype, list(argtypes)
+def _kernel32():
+    global k32
+    if k32 is not None:
+        return k32
+    with _k32_lock:
+        if k32 is not None:
+            return k32
+        if sys.platform != "win32":
+            raise OSError("kernel32 process injection is only available on Windows")
+        dll = ctypes.WinDLL("kernel32", use_last_error=True)
 
+        def _declare(name, restype, *argtypes):
+            fn = getattr(dll, name)
+            fn.restype, fn.argtypes = restype, list(argtypes)
 
-_declare("OpenProcess", wt.HANDLE, wt.DWORD, wt.BOOL, wt.DWORD)
-_declare("CloseHandle", wt.BOOL, wt.HANDLE)
-_declare("VirtualAllocEx", ctypes.c_void_p, wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD, wt.DWORD)
-_declare("VirtualFreeEx", wt.BOOL, wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD)
-_declare(
-    "WriteProcessMemory",
-    wt.BOOL,
-    wt.HANDLE,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    ctypes.c_size_t,
-    ctypes.POINTER(ctypes.c_size_t),
-)
-_declare("GetModuleHandleW", wt.HMODULE, wt.LPCWSTR)
-_declare("GetModuleHandleExW", wt.BOOL, wt.DWORD, wt.LPCWSTR, ctypes.POINTER(wt.HMODULE))
-_declare("GetModuleFileNameW", wt.DWORD, wt.HMODULE, wt.LPWSTR, wt.DWORD)
-_declare("GetProcAddress", ctypes.c_void_p, wt.HMODULE, wt.LPCSTR)
-_declare(
-    "CreateRemoteThread",
-    wt.HANDLE,
-    wt.HANDLE,
-    ctypes.c_void_p,
-    ctypes.c_size_t,
-    ctypes.c_void_p,
-    ctypes.c_void_p,
-    wt.DWORD,
-    ctypes.POINTER(wt.DWORD),
-)
-_declare("WaitForSingleObject", wt.DWORD, wt.HANDLE, wt.DWORD)
-_declare("GetExitCodeThread", wt.BOOL, wt.HANDLE, ctypes.POINTER(wt.DWORD))
-_declare("QueryFullProcessImageNameW", wt.BOOL, wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD))
-_declare("CreateToolhelp32Snapshot", wt.HANDLE, wt.DWORD, wt.DWORD)
-_declare("Module32FirstW", wt.BOOL, wt.HANDLE, ctypes.POINTER(ModuleEntry))
-_declare("Module32NextW", wt.BOOL, wt.HANDLE, ctypes.POINTER(ModuleEntry))
+        _declare("OpenProcess", wt.HANDLE, wt.DWORD, wt.BOOL, wt.DWORD)
+        _declare("CloseHandle", wt.BOOL, wt.HANDLE)
+        _declare(
+            "VirtualAllocEx",
+            ctypes.c_void_p,
+            wt.HANDLE,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            wt.DWORD,
+            wt.DWORD,
+        )
+        _declare("VirtualFreeEx", wt.BOOL, wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD)
+        _declare(
+            "WriteProcessMemory",
+            wt.BOOL,
+            wt.HANDLE,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+        )
+        _declare("GetModuleHandleW", wt.HMODULE, wt.LPCWSTR)
+        _declare("GetModuleHandleExW", wt.BOOL, wt.DWORD, wt.LPCWSTR, ctypes.POINTER(wt.HMODULE))
+        _declare("GetModuleFileNameW", wt.DWORD, wt.HMODULE, wt.LPWSTR, wt.DWORD)
+        _declare("GetProcAddress", ctypes.c_void_p, wt.HMODULE, wt.LPCSTR)
+        _declare(
+            "CreateRemoteThread",
+            wt.HANDLE,
+            wt.HANDLE,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wt.DWORD,
+            ctypes.POINTER(wt.DWORD),
+        )
+        _declare("WaitForSingleObject", wt.DWORD, wt.HANDLE, wt.DWORD)
+        _declare("GetExitCodeThread", wt.BOOL, wt.HANDLE, ctypes.POINTER(wt.DWORD))
+        _declare(
+            "QueryFullProcessImageNameW",
+            wt.BOOL,
+            wt.HANDLE,
+            wt.DWORD,
+            wt.LPWSTR,
+            ctypes.POINTER(wt.DWORD),
+        )
+        _declare("CreateToolhelp32Snapshot", wt.HANDLE, wt.DWORD, wt.DWORD)
+        _declare("Module32FirstW", wt.BOOL, wt.HANDLE, ctypes.POINTER(ModuleEntry))
+        _declare("Module32NextW", wt.BOOL, wt.HANDLE, ctypes.POINTER(ModuleEntry))
+        k32 = dll
+        return k32
 
 
 # While a process is still loading, its module list is unstable: the snapshot can fail with
@@ -94,6 +125,7 @@ def _modules(pid, patience=2.0):
 
 
 def _snapshot_modules(pid):
+    k32 = _kernel32()
     handle = k32.CreateToolhelp32Snapshot(0x08 | 0x10, pid)
     if handle == INVALID_HANDLE:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -123,6 +155,7 @@ def _loaded_module(pid, path):
 
 def remote_load_library(pid):
     """Resolve the remote export by its owning DLL, including forwarded exports."""
+    k32 = _kernel32()
     address = k32.GetProcAddress(k32.GetModuleHandleW("kernel32.dll"), b"LoadLibraryW")
     if not address:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -141,6 +174,7 @@ def remote_load_library(pid):
 
 def image_path(pid):
     """Full path of a process's executable, or None when it cannot be read."""
+    k32 = _kernel32()
     process = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not process:
         return None
@@ -156,6 +190,7 @@ def image_path(pid):
 
 def process_exited(pid):
     """Confirm exit when Windows still lists the PID and a handle can be opened."""
+    k32 = _kernel32()
     process = k32.OpenProcess(SYNCHRONIZE, False, pid)
     if not process:
         return False
@@ -196,6 +231,7 @@ def inject(dll_path: str, pid: int, timeout_ms: int = 10000) -> int:
         return loaded
     loader = remote_load_library(pid)
     dll = (str(path) + "\0").encode("utf-16-le")
+    k32 = _kernel32()
     process = k32.OpenProcess(PROCESS_INJECT, False, pid)
     if not process:
         raise ctypes.WinError(ctypes.get_last_error())

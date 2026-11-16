@@ -47,6 +47,7 @@ from ow174.game.bits import BitWriter
 
 OP_CREATE, OP_UPDATE, OP_DESTROY = 1, 2, 3
 GAME_MODE_ENTITY = 0xD0000010
+EQUIPPED_COSMETICS = 65
 
 # Create flags.
 WITH_SKIN = 0x01
@@ -71,6 +72,7 @@ COMPONENT_FIELDS = {
     # The health component (type 0x7FF78BFE8720): 16 health, 16 armour and 16 shield pools (see pool),
     # then u32, u32, entity, u8, u8.
     51: ["blob:20"] * 48 + ["u32", "u32", "entity", "u8", "u8"],
+    EQUIPPED_COSMETICS: ["id"] * 9,  # spray slots 0-3 and emote slots 5-8
     # MECGameModeParticipant: portrait frame (the client loads its asset, 0x7FF7894C9D90), s16, slot,
     # lfg role, u8, role queue role, can select a hero, u8, u8.
     74: ["id", "s16", "s8", "u8", "u8", "s8", "u8", "u8", "u8"],

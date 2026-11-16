@@ -13,6 +13,38 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Generate the optional voice tables from a local 104319 installation. The extractor resolved 1,043 voice unlocks across 139 distinct effects. The original client reported Mercy's equipped line 7E05. The local tester confirmed Hello, Thanks and Need Healing.
 - Passed Ruff, 921 public Python tests, six dashboard tests and 54 prepared-runtime communication and voice tests. The runtime checks use the shared synthetic voice contract and the candidate's locally generated voice catalog.
 
+#### Communication-wheel emotes
+
+- Carry the authored 004B camera distance, offset and bone through to the 023A owner frame. Apply the emote's authored angle lock until its state ends. Regenerated the local D.Va target-tag table with the mech and pilot definitions.
+- The crash assertion identified component 65 as absent from Mercy's body. A read-only sample of a subsequent 104319 Practice Range match found component 65 on the player controller. Equipped unlocks now travel with the controller's possession update, including zeroes to clear stale slots on hero change. The body create retains its original component set.
+- Passed 78 communication-wheel, world and StateScript codec tests. After a local restart, the original client entered Practice Range and switched among Mercy, Widowmaker, Brigitte and Moira without another crash report. The user confirmed that Mercy's emote animation played, and reported that some emotes displayed the pistol where the staff was expected.
+- Check the body default first in the weapon manager's emote/death branch. Mercy's staff stays selected in the owner stream during Relax, including when she stands, and during Flurry and Caduceus. Ordinary weapon cycling still selects the pistol after cleanup. Passed 123 communication-wheel, world, StateScript codec and projectile tests, plus offline replays with the prepared 104319 animation durations. After the local restart, the user confirmed the correct weapon model in the original client for 「放松」 and 「权舞风起」 in Practice Range.
+- Restored the six missing emote tables in the local build-104319 runtime. Verified positive animation durations for all 292 equipped blend-tree and alias pairs across the default, intro and exit categories.
+- Replayed confirmed wheel selections through the production message handler and decoded the owner updates. Soldier: 76's Heroic completed at its authored duration. Take a Knee held the active state past the loop clip length and sent its exit and cleanup after primary fire. All 44 communication-wheel tests passed. The local server restarted and its lobby, game and dashboard endpoints are ready. The user confirmed the corrected third-person camera placement in the original client.
+- The source-only publication branch passed Ruff, 921 public Python tests, six JavaScript tests, runtime preflight and a headless lobby, Battle.net RPC, game UDP and dashboard smoke test. Practice Range prepared collision and 15 bots from external runtime data.
+- Known limitation: displacement-driven emotes can move incorrectly. Follow-up examples are Doomfist (「有胆就来」), Bastion (「行尸走械」), and Mei (「僵尸跳」).
+
+### 2026-11-15
+
+#### Linux compatibility for the Python reference server and public tests
+
+- Deferred `ctypes.WinDLL("iphlpapi")` and `ctypes.WinDLL("kernel32")` loading in `ow174.launcher.connections` and `ow174.launcher.inject` behind `sys.platform == "win32"` lazy helpers so importing `ow174.cli` or running `--mode server` works on Linux.
+- Returned `None` from `connection_owner` on non-Windows platforms and skipped the Windows-only `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy` hook test outside `win32`.
+- Passed Ruff, 920 public Python tests (`1` skipped: `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy`), `ow174 --mode server` missing-runtime check without a prepared pack, and `tests.runtime.test_lobby_smoke` against a prepared runtime on Arch Linux (Python 3.14.8).
+
+#### Profile settings normalization and shared contract
+
+- Normalized `profile.settings["+0x130"]` compound keys (`+0x8`) as signed 32-bit integers and preserved 64-bit `+0x0` values in `Profile.from_dict` and `save_values` (22204), rejecting out-of-range or boolean values.
+- Documented full-block replacement for 22200–22203 and last-write-wins merge semantics for 22204, and added the synthetic `fixtures/behavior/profile-settings-v1.json` contract with `tests/public/test_profile_settings_contracts.py`.
+- Passed `tests/public/test_profile_settings_contracts.py` (2 tests) and `git diff --check`. Original-client acceptance remains pending.
+
+### 2026-11-13
+
+#### Catalog preparation runs DataTool from its own folder
+
+- `tools/prepare_client_catalogs.py` now starts DataTool in the DataTool folder. DataTool reads `Static/GUIDNames.csv` relative to the working directory, so a run from the repository root named no hero classes (`Class: null`) and the prepared hero catalog then failed lobby login in `content/career.py`. Started from its own folder, the generated hero, item and general unlock catalogs matched existing prepared copies exactly in a local 104319 check.
+- The public catalog test checks the working directory. Passed Ruff and the public Python tests.
+
 ### 2026-11-12
 
 #### Strict World query behavior contract

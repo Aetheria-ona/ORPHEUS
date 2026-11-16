@@ -193,6 +193,15 @@ Source paths for the remaining actions
   and 069A:9. The selected action enters 069A via parameter 08FC as a
   one-item array. The slot reaches 023A through the subscript's variable
   9254. The owner stream carries 069A, its 023A child and 1040.
+  Build 104319's package request starts at D3FAB0. The 1040 query
+  resolves the pawn's possessor and reads the selected unlock on that
+  entity. In a local Practice Range session the player's controller
+  had component 65 and Mercy's pawn had no such component. Two crash
+  reports from the earlier body-create experiment identify the missing
+  component in the pawn's create. Apply the sparse unlock IDs only to
+  the controller's equipment fields 5 through 8 with the possession
+  update. The client can then use the normal package helper. The field
+  layout is described at https://rentry.co/z42v8ykq.
 - In 104319, the STU_250DEABD evaluator at CD7490 calls BCC930 for
   slots 0–3, resolves the equipped 0A5 unlock and checks STUUnlock_Emote.
   CD7B08 reads m_emote at +F8. When the m_7E3ED979 tag count is zero,
@@ -447,6 +456,15 @@ Source paths for the remaining actions
   then releases fire, ends the block and presses fire again. The authored
   023A:52 exit lasts 367 ms. The 023A:51 wait reaches the terminal
   action at 1000 ms and retires 023A, 069A and 1040.
+- While 023A holds entity var 1956, weapon manager 0015 initializes
+  the requested slot from the body default at node 68. Node 70 checks
+  that slot first and falls through to the next available slot if needed.
+  The regular next/previous weapon nodes still advance before checking.
+  Mercy's staff (006B) stays active through the Relax exit and the
+  single-shot Flurry and Caduceus replays. The decoded owner slot agrees
+  with the weapon state, and a normal switch selects the pistol (006D)
+  after the emote ends. The user confirmed the correct model for 「放松」
+  and 「权舞风起」 in the original 104319 Practice Range client.
 - The same PlayScript path now starts the self-targeted 0686 graph from
   05AD nodes 117 and 131. Their 05C5 message reaches 0686 node 33 and the
   graph selects the fixed, configurable or voice branch. Initializer 62

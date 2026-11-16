@@ -1,6 +1,7 @@
 """The native wheel graphs enter the ordinary player body stream."""
 
 import json
+import os
 import struct
 import unittest
 from dataclasses import replace
@@ -13,6 +14,7 @@ from ow174.catalog.items import ItemDB
 from ow174.catalog.templates import RetailTemplates
 from ow174.content.collection import Collection
 from ow174.game import combat, messages, observers, props, statescript
+from ow174.game import world as game_world
 from ow174.game.bits import BitWriter
 from ow174.game.body_vm_snapshot import export_body_vm
 from ow174.game.collision import RayAttachment, RayHit, RayWorld, StaticCollisionProvider, World, flat_world
@@ -20,7 +22,7 @@ from ow174.game.commands import FIRE, Command
 from ow174.game.content import PRACTICE_RANGE, SOLDIER, heroes
 from ow174.game.match import Match
 from ow174.game.script import decode, expr, graph, runtime, spray_placement
-from ow174.game.script.driver import ULT_COST, BodyScript, BodyStream
+from ow174.game.script.driver import SETTLE_FRAMES, ULT_COST, BodyScript, BodyStream
 from ow174.game.world import OP_CREATE, EntityUpdate
 from ow174.paths import (
     EMOTE_ALIAS_DATA,
@@ -566,8 +568,12 @@ class CommunicationWheelTests(unittest.TestCase):
         self.assertEqual(spray.vars[9259].value(), 2)
 
     def test_equipped_animation_selection_replicates_authored_emote_graphs(self):
+        fixtures = Path(os.environ.get("ORPHEUS_BEHAVIOR_FIXTURES")
+                        or Path(__file__).resolve().parents[2] / "fixtures/behavior")
+        fixture = json.loads((fixtures / "wheel-emote-presentation-v1.json").read_text(encoding="utf-8"))
+        inputs, expected = fixture["input"], fixture["expected"]
         # Soldier's Heroic and Take a Knee unlocks from 104319.
-        heroic, kneel = "0x0250000000000904", "0x0250000000000BE2"
+        heroic, kneel, _ = inputs["emote_slots"]
         default_alias, chosen_alias = 0x0C8000000000045C, 0x0C80000000000476
         default_blend, chosen_blend = 0x00400000000006AD, 0x00400000000006B2
         with TemporaryDirectory() as directory:
@@ -584,10 +590,11 @@ class CommunicationWheelTests(unittest.TestCase):
         collection = Collection(RetailTemplates(), items)
         profile = Profile()
         self.assertEqual(collection.emote_aliases(profile, SOLDIER), (default_alias,))
-        profile.loadouts[f"0x{SOLDIER:016X}"] = {"+0x88": [heroic, kneel, "0x0"]}
+        profile.loadouts[f"0x{SOLDIER:016X}"] = {"+0x88": inputs["emote_slots"]}
         match = Match(
             PRACTICE_RANGE,
             collision_provider=StaticCollisionProvider(flat_world(1.0)),
+            emote_unlocks_of=lambda _, hero: collection.emote_unlocks(profile, hero),
             emote_aliases_of=lambda account, hero: (
                 collection.emote_aliases(profile, hero) if account == 1 else ()
             ),
@@ -596,7 +603,20 @@ class CommunicationWheelTests(unittest.TestCase):
             ),
         )
         player = match.add_player(1, "Soldier", SOLDIER, 0, False)
+        in_world(match, player)
+        match.switch_hero(player, player.hero)
+        player.mover.yaw, player.mover.pitch = inputs["start_angles"]
         [create] = match.own_body_updates(player)
+        with patch.object(game_world, "create", wraps=game_world.create) as write_create:
+            create.build(0)
+        self.assertNotIn(game_world.EQUIPPED_COSMETICS, write_create.call_args.args[2])
+        cosmetics = match._possession(player)[game_world.EQUIPPED_COSMETICS]
+        update = game_world.update(0, {game_world.EQUIPPED_COSMETICS: cosmetics})
+        self.assertEqual(update.getvalue().hex(), expected["controller_cosmetics_update_hex"])
+        profile.loadouts[f"0x{SOLDIER:016X}"] = {"+0x88": [heroic]}
+        cleared = match._possession(player)[game_world.EQUIPPED_COSMETICS][5:]
+        self.assertEqual(cleared, [int(heroic, 16), 0, 0, 0])
+        profile.loadouts[f"0x{SOLDIER:016X}"] = {"+0x88": inputs["emote_slots"]}
         body = player.body_script
         client = decode.ClientBody.for_hero(SOLDIER)
         create.stream.arrived(0)
@@ -613,7 +633,7 @@ class CommunicationWheelTests(unittest.TestCase):
             instance for instance in body.component.instances.values() if instance.graph.index == 0x05AD
         )
         query = wheel.graph.node(107).field("m_condition")["m_configVars"][0]
-        for choice, expected in (
+        for choice, expected_alias in (
             (0x172, default_alias),
             (0x1A1, chosen_alias),
             (0x1A0, 0),
@@ -622,12 +642,12 @@ class CommunicationWheelTests(unittest.TestCase):
         ):
             with self.subTest(choice=hex(choice)):
                 wheel.write((expr.INSTANCE, 29699), expr.Asset(0x0A90000000000000 | choice))
-                self.assertEqual(wheel.evaluate(query), expr.Asset(expected))
+                self.assertEqual(wheel.evaluate(query), expr.Asset(expected_alias))
 
         runtime.send_message(
             body.component,
             0x02400000000002A3,
-            {0x8FC: expr.Asset(0x0A900000000001A1), 0x3E1: True},
+            {0x8FC: expr.Asset(int(inputs["chosen_action"], 16)), 0x3E1: True},
             body.entity,
         )
         body.command(body.frame + 1, 0)
@@ -642,6 +662,22 @@ class CommunicationWheelTests(unittest.TestCase):
         self.assertEqual(client.graphs[emote.id], 0x069A)
         self.assertEqual(client.records[animation.id], (0x023A, (emote.id, animation.parent_state)))
         self.assertEqual(client.graphs[helper.id], 0x1040)
+        self.assertEqual(client.vars[helper.id, 39], tuple(expected["package_slot"]))
+        self.assertEqual(client.vars[animation.id, 2296], (expr.Asset(int(expected["camera_bone"], 16)),))
+        self.assertEqual(client.vars[animation.id, 2286], (expected["camera_distance"],))
+        self.assertEqual(expr.to_float(client.vars[animation.id, 6057]), expected["camera_height_offset"])
+        self.assertTrue(client.states[animation.id, 2])
+        self.assertEqual([client.vars[animation.id, var] for var in (501, 502)], expected["locked_degrees"])
+        yaw, pitch = inputs["mouse_angles"]
+        player.take_commands([Command(body.frame + 1, yaw=yaw, pitch=pitch)])
+        self.assertEqual([player.mover.yaw, player.mover.pitch], expected["locked_angles"])
+        body.component.destroy(emote)
+        player.take_commands([Command(body.frame + 1, yaw=yaw, pitch=pitch)])
+        self.assertEqual([player.mover.yaw, player.mover.pitch], inputs["mouse_angles"])
+        body.command(body.frame + SETTLE_FRAMES, 0)
+        replicate()
+        self.assertNotIn(animation.id, client.graphs)
+        self.assertFalse(client.vars.get((0, 1956)))
 
     def test_emote_completion_releases_the_authored_stack_and_allows_another_selection(self):
         aliases = (0x0C8000000000045C, 0x0C80000000000476)
@@ -881,6 +917,69 @@ class CommunicationWheelTests(unittest.TestCase):
                 self.assertEqual(variable.links, [])
                 # The authored onEnd plug writes its own zero vector after unlinking.
                 self.assertEqual(variable.value(), expr.Vec3(0.0, 0.0, 0.0))
+
+    def test_mercy_emotes_keep_the_staff_through_exit_and_allow_manual_switch(self):
+        fixtures = Path(os.environ.get("ORPHEUS_BEHAVIOR_FIXTURES")
+                        or Path(__file__).resolve().parents[2] / "fixtures/behavior")
+        fixture = json.loads((fixtures / "wheel-emote-weapon-v1.json").read_text(encoding="utf-8"))
+        inputs, expected = fixture["input"], fixture["expected"]
+        hero = int(inputs["hero"], 16)
+        durations = {
+            emote["blend_tree"]: {emote["alias"]: emote["durations"]} for emote in inputs["emotes"]
+        }
+        data = Path(self.enterContext(TemporaryDirectory()))
+        (data / EMOTE_DURATION_DATA).write_text(json.dumps(durations), encoding="utf-8")
+        self.enterContext(patch("ow174.game.script.driver.DATA_DIR", data))
+        weapon_graphs = {int(slot): int(index, 16) for slot, index in expected["weapon_graphs"].items()}
+        manual_switch = inputs["switch_weapon_frame_offset"]
+
+        def replicate(body, client):
+            for update in body.frames():
+                client.apply(update)
+                body.stream.arrived(update.chunk_last)
+
+        for emote in inputs["emotes"]:
+            with self.subTest(emote=emote["name"]):
+                body = BodyScript(
+                    hero, 0xA0000101, inputs["start_frame"], communication_wheel=True,
+                    emote_aliases=(int(emote["alias"], 16),),
+                    emote_blend_trees=(int(emote["blend_tree"], 16),),
+                )
+                create = EntityUpdate(body.entity, OP_CREATE)
+                body.created(create)
+                create.stream.arrived(0)
+                client = decode.ClientBody.for_hero(hero)
+
+                replicate(body, client)
+                for offset in range(1, manual_switch + 1):
+                    if offset == inputs["wheel_selection_frame_offset"]:
+                        runtime.send_message(
+                            body.component, 0x02400000000002A3,
+                            {0x8FC: expr.Asset(int(inputs["wheel_action"], 16)), 0x3E1: True}, body.entity,
+                        )
+                    body.command(
+                        body.frame + 1, FIRE if offset == emote.get("cancel_frame_offset") else 0,
+                        action=2 if offset == manual_switch else 0, grounded=True,
+                    )
+                    phase = emote["active_at"].get(str(offset))
+                    if phase is None and offset not in (emote["finished_at"], manual_switch):
+                        continue
+                    replicate(body, client)
+                    instances = {i.graph.index: i for i in body.component.instances.values()}
+                    if phase is not None:
+                        animation = instances[0x023A]
+                        self.assertTrue(animation.node_state(animation.graph.node(phase)).active)
+                        slot = expected["emote_weapon_slot"]
+                    elif offset == manual_switch:
+                        slot = expected["manual_switch_weapon_slot"]
+                    else:
+                        self.assertNotIn(0x023A, instances)
+                        self.assertNotIn(0x023A, client.graphs.values())
+                        slot = expected["post_emote_weapon_slot"]
+                    self.assertEqual(client.vars[0, 31], slot)
+                    for weapon_slot, index in weapon_graphs.items():
+                        weapon = instances[index]
+                        self.assertEqual(weapon.node_state(weapon.graph.node(1)).active, weapon_slot == slot)
 
     def test_equipped_kneel_timing_and_cancel_follow_body_commands(self):
         alias, blend = 0x0C80000000000476, 0x00400000000006B2

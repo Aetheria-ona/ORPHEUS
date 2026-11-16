@@ -9,6 +9,7 @@ This repository builds on existing Overwatch preservation work. Its lobby improv
 
 ## Protocol research and shared findings
 
+- [Overwatch 1.74 Match Protocol](https://rentry.co/z42v8ykq) supplied the equipped emote fields in component 65 and identified 1040's unlock-package request.
 - **Xref** — big thanks for sharing a knowledge base of captured Overwatch 2 game traffic and research on the 1.74 game server. It gave us the facts behind the game server, matchmaking and hero select, and saved a lot of time.
 - **The AyakaPS Discord community** — fellow Overwatch researchers who share findings, information and research with one another. Thanks to the members whose shared work helped this project.
 - **Logo2K, a researcher in the AyakaPS community** — shared research notes and a lobby-map reference:
