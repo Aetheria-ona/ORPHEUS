@@ -62,6 +62,7 @@ from ow174.game.mover import (
     Mover,
     MoverData,
     mover_data,
+    server_only_mods,
     statescript_mods,
     statescript_mover_data,
 )
@@ -409,7 +410,10 @@ class Player:
     def track_body_modifiers(self, frame: int) -> None:
         # Modifier changes take effect on the next movement frame.
         script = self.body_script
-        self.mover.track_mods(statescript_mods(script.component) if script else {}, frame)
+        active = statescript_mods(script.component) if script else {}
+        self.mover.track_mods(active, frame)
+        if script is not None and server_only_mods(script.component, active):
+            correction.server_motion(self, frame)
 
     def new_body(self, entity: int) -> None:
         """Set up the allocated body at the spawn point."""

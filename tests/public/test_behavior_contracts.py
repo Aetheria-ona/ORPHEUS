@@ -4,9 +4,11 @@ import json
 import os
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from ow174.game import statescript
+from ow174.game import correction, movelog, mover, statescript
+from ow174.game.commands import Command
 from ow174.game.script import decode, nodes, runtime
 from ow174.game.script.driver import BodyStream, Snapshot, WheelCallout, frame_callout
 from ow174.game.script.expr import Entity, Vec3
@@ -263,6 +265,52 @@ class ShortFrameActionContractTests(unittest.TestCase):
                     self.assertEqual(stream.base.callout, expected["acknowledged_serial"])
                     self.assertIsNone(frame_callout(stream.base, pending, stream.touched(), set(),
                                                     stream.last + 1))
+
+
+class ServerOnlyMovementContractTests(unittest.TestCase):
+    def setUp(self):
+        self.contract = json.loads((FIXTURES / "server-only-movement-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(self.contract["schema_version"], 1)
+        self.assertEqual(self.contract["case_id"], "movement.server-only-direction.v1")
+        self.assertEqual(self.contract["target_build"], 104319)
+        self.assertEqual(self.contract["evidence"], "synthetic-reference")
+
+    def test_a_direction_mod_turns_the_throttles(self):
+        ops = {"add": mover.ADD, "set": mover.SET}
+        cases = zip(self.contract["input"]["direction_cases"], self.contract["expected"]["direction_cases"],
+                    strict=True)
+        for case, expected in cases:
+            with self.subTest(case=case):
+                mods = [mover.Mod(mover.MOVE_DIRECTION, ops[op], tuple(value), 0)
+                        for op, value in case["mods"]]
+                result = mover.directed_throttles(mods, *case["throttles"], tuple(case["facing"]))
+                self.assertEqual(list(result), expected)
+
+    def test_the_owner_gets_its_body_from_the_first_moved_frame_through_the_tail(self):
+        inputs, expected = self.contract["input"]["records"], self.contract["expected"]["records"]
+        first, last = inputs["frames"]
+        on_from, on_through = inputs["server_only_frames"]
+        player = SimpleNamespace(
+            has_body=True, body=0x1234, quanta=inputs["frame_us"], impulse_correction=None,
+            body_script=SimpleNamespace(create_arrived=True), hero=SimpleNamespace(guid=0x02E000000000012F),
+            mover=mover.Mover((0.0, 1.0, 0.0), data=mover.MoverData()),
+            commands=SimpleNamespace(last_frame=None),
+        )
+        windows, sent = {}, []
+        with patch.object(movelog, "ENABLED", False):
+            for frame in range(first, last + 1):
+                player.mover.step(Command(frame), inputs["frame_us"] / 1e6, frame)
+                player.commands.last_frame = frame
+                if on_from <= frame <= on_through:
+                    correction.server_motion(player, frame)
+                update = correction.own_record(player, frame)
+                if update is not None:
+                    correction.sent(player, update)
+                    sent.append(update.movement.frame)
+                windows[frame] = list(player.impulse_correction) if player.impulse_correction else None
+        for frame, window in expected["windows"]:
+            self.assertEqual(windows[frame], window, frame)
+        self.assertEqual(sent, list(range(expected["sent_frames"][0], expected["sent_frames"][1] + 1)))
 
 
 if __name__ == "__main__":

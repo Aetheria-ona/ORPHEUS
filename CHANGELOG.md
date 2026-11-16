@@ -4,6 +4,37 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-15
+
+#### Rocket Punch dash
+
+- Send the owner its body's movement records while a mod of a server-only
+  MovementMod state moves the body, and for 250 ms after. The owning client
+  runs no server-only state, so it cannot predict Rocket Punch's dash (`0D06`
+  state 42). The server moved the body while the client stayed in place.
+  Only `0D06` has server-only movement mods in build 104319.
+- Apply the MovementMod's channel 2 direction vector (`STU_09F9B1FE`, set).
+  Forward throttle moves along the authored world direction (client RVAs
+  C33A85 through C33D91), so the dash keeps its release facing while the
+  view turns.
+- Add the synthetic `server-only-movement-v1` contract, unit tests for mod
+  collection and the record window, and a prepared 104319 regression for
+  minimum and full charge, a turning view, cancellation and a wall.
+- Passed Ruff, 940 public Python tests, six dashboard tests and the four new
+  Rocket Punch runtime tests, plus the mover, correction, move-to, slam and
+  movelog suites. `test_ssq`, the Rialto McCree radius test and the airborne
+  slam replay fail the same way on `c73e5a49`, from missing local data and a
+  replay `KeyError`.
+- Original client on the Practice Range: a minimum charge ends about 6 m
+  ahead and a full charge about 20 m ahead. A wall stops the dash, a turning
+  view keeps it straight, and a cancel stays in place. The traced server sent
+  records from the first frame of each of 29 dashes.
+- Still open: the view drops below the floor while the dash runs (also on
+  `c73e5a49`). Doomfist cannot walk while charging: the server sends the
+  charge slow's entity variable with the charge stack already applied, and
+  the client's self-referential stack applies it again (inference). Wall
+  impacts (`STU_FBFF5DE7`), target knockback and damage also remain open.
+
 ### 2026-11-12
 
 #### Seismic Slam airborne targeting
