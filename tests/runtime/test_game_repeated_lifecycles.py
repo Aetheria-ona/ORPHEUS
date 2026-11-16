@@ -10,9 +10,14 @@ import logging
 import select
 import socket
 import struct
+import sys
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_game_server as server_tests
 import test_game_to_game as transition_tests

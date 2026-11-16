@@ -1,7 +1,12 @@
 """PR #16 regressions that use authored target-build hero and scene graphs."""
 
+import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ow174.game.combat import Vitals
 from ow174.game.junkenstein_dialogue import Playback

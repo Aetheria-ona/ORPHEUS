@@ -1,8 +1,13 @@
 """Explicit manual-controller policy and its scoped query/snapshot boundary."""
 
+import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ow174.game import npc_context
 from ow174.game.body_vm_snapshot import export_component_vm, snapshot_digest

@@ -79,6 +79,27 @@ python -S -B -m unittest tests.public.test_world_query_contracts
 
 This source-only check needs neither installed dependencies nor prepared runtime data. It uses the same `ORPHEUS_BEHAVIOR_FIXTURES` override as the framing consumer. The contract covers query results and error categories only: Python's strict host faults and stops the component, while Rust records an expression issue and declines that evaluation. It does not establish equivalent component recovery, event order, live foreign-variable watchers or client behavior. Original-client acceptance remains pending.
 
+## Profile settings persistence
+
+The [profile settings fixture](../fixtures/behavior/profile-settings-v1.json)
+records synthetic client-to-lobby settings updates (`22200`–`22204`), saved
+`+0x130` keybind/value normalization (signed 32-bit key and 64-bit value
+bounds, last-write-wins merge), and the resulting outgoing `20802` payload.
+The [Python consumer](../tests/public/test_profile_settings_contracts.py) tests
+the production profile, lobby settings handler and player message paths using
+`ORPHEUS_BEHAVIOR_FIXTURES` without requiring prepared runtime data, and `rust`
+verifies the matching fixture in `rust/tests/profile_settings.rs`. Original-client
+acceptance remains pending.
+
+## Equipped player voice playback
+
+The [player voice fixture](../fixtures/behavior/player-voice-v1.json) specifies
+a synthetic hero voice catalog, trigger stimuli and expected friendly vs. hostile
+listener delivery (`PlayerVoiceTests` in
+[test_game_voicelines.py](../tests/runtime/test_game_voicelines.py)) using
+`ORPHEUS_BEHAVIOR_FIXTURES`. Running this consumer requires an authorized 104319
+runtime pack.
+
 ## Communication-wheel emote presentation
 
 The [emote presentation fixture](../fixtures/behavior/wheel-emote-presentation-v1.json)

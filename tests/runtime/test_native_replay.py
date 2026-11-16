@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ow174.game.commands import FIRE, FRAME_MASK, Command
 from ow174.game.content import SOLDIER
@@ -368,8 +369,9 @@ class NativeReplayTests(unittest.TestCase):
             self.assertEqual(module.main(args), 3)
 
     def test_state_hash_matches_in_fresh_processes_with_different_hash_seeds(self):
+        runtime_dir = repr(str(Path(__file__).resolve().parent))
         code = (
-            "import sys;sys.path.insert(0,'tests');"
+            f"import sys;sys.path.insert(0,{runtime_dir});"
             "from test_native_replay import trace;"
             "from ow174.game.native_replay import replay_document;"
             "print(replay_document(trace())['state_hash'])"

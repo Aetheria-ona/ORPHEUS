@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from tests.runtime.test_game_graph_analysis import make_graph, node, output
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ow174.game import bodytrace, bots, combat, movelog, observers, stats, world
 from ow174.game.bits import BitReader, BitWriter
