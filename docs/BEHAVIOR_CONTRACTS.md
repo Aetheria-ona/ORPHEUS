@@ -57,8 +57,14 @@ mod: records from the first moved frame through a 250 ms tail. It pins the
 104319 Rocket Punch dash (`0D06` state 42) and the client's throttle function.
 The [prepared-runtime regression](../tests/runtime/test_doomfist_rocket_punch.py)
 runs Rocket Punch with real command input for minimum and full charge, a
-turning view, cancellation and a wall. Original-client presentation of the
-dash remains pending: the view drops below the floor while it runs.
+turning view, cancellation and a wall. It also checks that the owner sees the
+dash's `STU_4773DA56` registration (`0D06` #138) and its child (#141) as on,
+as retail sends them, and gets its body's records from the charge on. While
+#138 is on, the original client draws the first-person view from the states it
+keeps of its body. Those take a record only when its frame is above the newest
+kept one, so the own body's create puts its state 18 frames past the packet
+frame, not at the create path's default `0xFFFFFFFE`. At a frame the client had
+already predicted, it started its own body under the floor.
 
 ## Strict World queries
 

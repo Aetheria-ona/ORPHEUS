@@ -35,7 +35,9 @@ Lucio's wall ride, Mercy's flight) would be pulled back by every record. Of thos
 the ones whose movement the server's mover follows. Any other body gets records in a window: McCree's
 server-only velocity changes (`force_impulse`), and while a mod of a server-only MovementMod state moves it
 (`server_motion`). The owner's client runs no server-only state, so it cannot predict that movement and
-follows it only from these records (Doomfist's Rocket Punch dash, 0D06 state 42).
+follows it only from these records (Doomfist's Rocket Punch dash, 0D06 state 42). And while a
+STU_4773DA56 registration may be on (`registration_view`): the client then draws its own view from the
+states it keeps of its body, which only these records bring up to date (match.own_body_updates).
 """
 
 from dataclasses import dataclass
@@ -120,6 +122,29 @@ def server_motion(player, frame: int) -> None:
     if previous is not None:
         first, through = previous[0], max(previous[1], through)
     player.impulse_correction = (first, through)
+
+
+# A STU_4773DA56 registration adds itself, with a start frame, to a set on the body's component 43 (slot 24,
+# RVA 9B0EF0). While one is on, the original client draws the owner's first-person view from the states it
+# keeps of its body (the create's and the records', match.own_body_updates), not from its prediction: shown
+# in live A/B runs, the mechanism past the component lookup is obfuscated. The client also turns one on by
+# itself from its prediction before the server's frame confirms it, so the window opens on the state that
+# leads into it: Rocket Punch's charge (0D06 ChaseVar #23; the dash's #138 begins at its release, at least
+# 0.2 s in), and the kept state is current when the dash starts.
+REGISTRATION = "STU_4773DA56"
+REGISTRATION_LEADS = {(0x0D06, 23)}
+
+
+def registration_view(component) -> bool:
+    """Whether the owner's view may come from its body's kept states: a registration or a lead state is on."""
+    for instance in component.instances.values():
+        index = instance.graph.index
+        for state in instance.states.values():
+            if state.active and (
+                state.node.cls == REGISTRATION or (index, state.node.pos) in REGISTRATION_LEADS
+            ):
+                return True
+    return False
 
 
 def _eligible(player) -> bool:
