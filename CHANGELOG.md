@@ -446,8 +446,8 @@ This log records tested changes and their acceptance status. Entries are grouped
 #### Python hero and PvE integration
 
 - Import the partial hero and PvE contribution from [PR #16](https://github.com/leafall903/ORPHEUS/pull/16)
-  and credit its submitter, `zichao-zhou`. Keep the original candidate's evidence and scope in
-  the [hero verification record](docs/HERO_SERVER_ACCEPTANCE.md).
+  and credit its submitter, `zichao-zhou` (the archived candidate record lived in
+  `docs/HERO_SERVER_ACCEPTANCE.md`).
 - Integrate the Rialto sandbox and McCree foundation, selected Ana, Mei, Winston and Pharah combat,
   and shared statescript and communication work into the current Python package layout. Preserve
   the Doomfist projectile and movement regressions and the Wrecking Ball Roll and shield behavior.
@@ -667,7 +667,7 @@ This log records tested changes and their acceptance status. Entries are grouped
   The focused suite passed all 63 tests. The extended suite passed 193 of 196,
   with three missing Junkenstein graph errors also reproduced in the foundation.
   Server-only retail startup passed on isolated ports using external Rialto data.
-  [The acceptance matrix](docs/HERO_SERVER_ACCEPTANCE.md) covers all 32 lanes.
+  [PR #16](https://github.com/leafall903/ORPHEUS/pull/16) tracks all 32 candidate lanes (`docs/HERO_SERVER_ACCEPTANCE.md`, archived).
   Original-client acceptance for the combined candidate remains open.
 
 - Checkpoint the Rialto PvE and McCree server foundation for isolated integration.
