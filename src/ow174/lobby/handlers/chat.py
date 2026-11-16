@@ -19,8 +19,15 @@ def chat(session: Session, value: dict) -> None:
     social = session.server.social
     channel = value.get("+0x78") or {}
     text = value.get("+0x90") or ""
-    if text.startswith(".") and _match_command(session, channel, text):
-        return
+    if text.startswith("."):
+        try:
+            handled = _match_command(session, channel, text)
+        except Exception as error:  # noqa: BLE001 — one line, never a traceback: a long reply splits
+            # without its control bytes and the lobby channel dies (11-12.11, .body)
+            session.log(f"[chat] {text} -> {type(error).__name__}: {error}")
+            handled = True
+        if handled:
+            return
     if session.local and session.npc_menu_open is True and text in NPC_CONSOLE_KEYS:
         game = session.server.game
         if game is not None and game.in_match(session.account.account_lo):
@@ -65,6 +72,8 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
 def _private_reply(session, channel, text, reply):
     session.log(f"[chat] {text} -> {reply}")
     bot = session.server.social.accounts.bot
+    reply = reply[:200]  # a long reply splits into the stream without control bytes and kills
+    # the lobby channel (learned the hard way from a traceback reply of a debug command)
     session.send(CHAT_IN, 20400, session.server.social.chat_message(channel, bot, reply))
 
 
