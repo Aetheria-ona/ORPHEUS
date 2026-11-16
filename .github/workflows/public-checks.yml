@@ -39,3 +39,33 @@ jobs:
         run: python -B -m unittest discover
       - name: Run dashboard JavaScript tests
         run: node --test tests/public/test_dashboard_client.mjs tests/public/test_npc_console_client.mjs
+      - name: Run launcher injection tests
+        run: python -B -m unittest tests/runtime/test_launcher_inject.py -v
+
+  source-tests-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ORPHEUS_RUNTIME_DIR: ""
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: "24"
+      - name: Install Python dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Check Python lint
+        run: python -B -m ruff check . --no-cache
+      - name: Run Python tests with synthetic fixtures
+        run: python -B -m unittest discover
+      - name: Run dashboard JavaScript tests
+        run: node --test tests/public/test_dashboard_client.mjs tests/public/test_npc_console_client.mjs
+      - name: Run launcher injection tests
+        run: python -B -m unittest tests/runtime/test_launcher_inject.py -v

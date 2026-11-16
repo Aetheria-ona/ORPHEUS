@@ -22,7 +22,7 @@ class FindPidsTests(unittest.TestCase):
             encoding="oem",
             errors="replace",
             check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
     def test_normal_csv_returns_only_matching_game_pids(self):
@@ -151,7 +151,11 @@ class ModuleSnapshotRetryTests(unittest.TestCase):
         def snapshot(pid):
             calls.append(pid)
             if len(calls) <= failures:
-                raise ctypes.WinError(code)
+                if hasattr(ctypes, "WinError"):
+                    raise ctypes.WinError(code)
+                error = OSError(code, f"WinError {code}")
+                error.winerror = code
+                raise error
             return [("C:\\game\\Overwatch.exe", 0x1000)]
 
         return snapshot, calls
@@ -184,6 +188,7 @@ class ModuleSnapshotRetryTests(unittest.TestCase):
         self.assertGreater(len(calls), 1)
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only live process image query")
 class ImagePathTests(unittest.TestCase):
     def test_image_path_of_a_real_process_and_of_a_missing_one(self):
         import os

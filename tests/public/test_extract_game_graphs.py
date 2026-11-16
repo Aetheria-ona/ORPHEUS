@@ -1,5 +1,6 @@
 """Unread DragonML nodes remain explicit instead of inventing input-plug ownership."""
 
+import gzip
 import io
 import json
 import sys
@@ -161,6 +162,63 @@ class EntityRootTests(unittest.TestCase):
         entity, = extended["entities"].values()
         self.assertEqual([item["graph"] for item in entity["graphs"]], [0x0BE2, 0x0033])
         self.assertIsNone(entity["hero"])
+
+    def test_optional_entity_cli_requires_external_output_and_keeps_default_hero_export(self):
+        with (
+            tempfile.TemporaryDirectory() as checkout,
+            tempfile.TemporaryDirectory() as external,
+        ):
+            root = Path(checkout).resolve()
+            outside = Path(external).resolve()
+            (root / "003").mkdir()
+            (root / "01B").mkdir()
+            (root / "Types.cs").write_text("", encoding="utf-8")
+            heroes = root / "heroes.json"
+            heroes.write_text("{}", encoding="utf-8")
+            default_out = root / "bundle.json.gz"
+            custom_inside = root / "entity.json.gz"
+            external_out = outside / "entity.json.gz"
+            (root / "003/000000001403.003.xml").write_text("<STUEntityDefinition />", encoding="utf-8")
+
+            rejected_argv = [
+                "extract_game_graphs.py", "--xml", str(root), "--owlib", str(root),
+                "--entity", "1403", "--output", str(custom_inside),
+            ]
+            errors = io.StringIO()
+            with (
+                patch.object(extractor, "ROOT", root),
+                patch.object(extractor, "OUT", default_out),
+                patch.object(extractor, "HEROES", heroes),
+                patch.object(extractor, "ROOT_GRAPHS", {}),
+                patch.object(sys, "argv", rejected_argv),
+                redirect_stderr(errors),
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                extractor.main()
+            self.assertEqual(stopped.exception.code, 2)
+            self.assertIn("--entity requires --output outside the repository", errors.getvalue())
+            self.assertFalse(custom_inside.exists())
+
+            default_argv = ["extract_game_graphs.py", "--xml", str(root), "--owlib", str(root)]
+            external_argv = [
+                "extract_game_graphs.py", "--xml", str(root), "--owlib", str(root),
+                "--entity", "1403", "--output", str(external_out),
+            ]
+            with (
+                patch.object(extractor, "ROOT", root),
+                patch.object(extractor, "OUT", default_out),
+                patch.object(extractor, "HEROES", heroes),
+                patch.object(extractor, "ROOT_GRAPHS", {}),
+            ):
+                with patch.object(sys, "argv", default_argv), patch("builtins.print"):
+                    extractor.main()
+                with patch.object(sys, "argv", external_argv), patch("builtins.print"):
+                    extractor.main()
+
+            default_data = json.loads(gzip.decompress(default_out.read_bytes()).decode("utf-8"))
+            external_data = json.loads(gzip.decompress(external_out.read_bytes()).decode("utf-8"))
+            self.assertNotIn("entities", default_data)
+            self.assertIn("0x0400000000001403", external_data["entities"])
 
 
 class SpawnerRootTests(unittest.TestCase):

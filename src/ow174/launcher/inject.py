@@ -209,7 +209,7 @@ def find_pids(name="Overwatch.exe"):
         encoding="oem",
         errors="replace",
         check=True,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return [
         int(row[1])
