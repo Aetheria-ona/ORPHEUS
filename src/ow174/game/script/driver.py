@@ -142,6 +142,7 @@ ACTION_BUTTONS.update({action: 81 + action for action in range(10, 16)})  # 10..
 WEAPON_SLOTS, DEFAULT_SLOT, OWNER_HEALTH, HUD_HEALTH, HUD_MAX_HEALTH = 29, 16515, 253, 1732, 1737
 NOT_SENT = {OWNER_HEALTH}  # the client derives it itself (never sent)
 BODY_SCALE_OVERRIDE = 31210  # the common body graph's size modifier input
+WHEEL_EMOTE_CAMERA_DEFAULTS = frozenset((2286, 2287, 8435, 2296, 2914))
 # The world's config vars whose server answer is the client's for a human player's own body (computed, or
 # answered null/false). A BooleanSwitch that reads any other one is uncertain and is not sent.
 TRUSTED_NATIVES = {
@@ -238,6 +239,7 @@ WHEEL_PLAY_GRAPHS = {
 }
 MAX_WHEEL_CALLOUTS = 32
 WHEEL_CALLOUT_MS = 2000
+NEED_HEALING_CRITERION = 0x0D80000000000724
 # The ultimate: its charge #342e is server data (no graph adds to it; the ultimate's graph sets it to 0 when
 # it starts), its cost #338e comes from the Entries. Combat credits it (combat.py through ult_charge.py);
 # the passive fills the rest in ULT_SECONDS (0: never) so a server with no combat rule still charges, and
@@ -437,6 +439,11 @@ class BodyWorld(runtime.World):
             return Vec3(f32(right * THROTTLE_UNIT), f32(forward * THROTTLE_UNIT), 0.0)
         if cls == "STU_37F20D24":  # GetGameMode: the match's mode (what component 114 announces)
             return Asset(self.mode)
+        if (cls == "STU_40AC5AE4" and self.communication_wheel and instance is not None
+                and instance.graph.index == 0x023A
+                and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
+            mover = self.match._script_body_mover(self.body, self.body) if self.match is not None else None
+            return f32(mover.pitch * (360 / 65536)) if mover is not None else 0.0
         if cls in {"STU_2200A66D", "STU_021D01CD", "STU_C8C4C20D"} and self.match is not None:
             entity = expr.to_entity(instance.evaluate(cfg.get("m_entity")))
             if expr.valid_entity(entity):
@@ -445,6 +452,10 @@ class BodyWorld(runtime.World):
                     if cls == "STU_C8C4C20D":
                         return f32(f32(math.atan2(facing.x, facing.z)) * 57.295780181884766)
                     return facing
+        if (cls == "STU_C8C4C20D" and self.communication_wheel and instance is not None
+                and instance.graph.index == 0x023A
+                and instance.evaluate(cfg.get("m_entity")) == Entity(self.body)):
+            return 0.0  # Standalone replays have no live mover.
         if cls == "STU_FDBB0B67":  # entity size used by the authored movement and effect graphs
             target = cfg.get("m_entity")
             component = instance.component
@@ -486,7 +497,7 @@ class BodyWorld(runtime.World):
             if cls == "STU_3E7F59D8" and instance.graph.index in (0x05AD, 0x069A):
                 return self.wheel_slot(cfg, instance, WHEEL_EMOTE_ACTIONS)
             if cls == "STU_250DEABD" and instance.graph.index in (0x05AD, 0x023A):
-                # CD7490 reads the equipped slot from the target body.
+                # CD7490 resolves the equipment holder. The match has the body's selected loadout.
                 target = cfg.get("m_target")
                 if (isinstance(target, dict) and target.get("$") == "STU_33980609"
                         and instance.evaluate(target.get("m_entity")) == Entity(self.body)):
@@ -804,6 +815,39 @@ class BodyWorld(runtime.World):
                                  selected.value() if selected else None, tuple(values))
         self.wheel_callouts.append(event)
         del self.wheel_callouts[:-MAX_WHEEL_CALLOUTS]
+        self._play_healing_callout(instance, node)
+
+    def _play_healing_callout(self, instance: runtime.Instance, node: graph.Node) -> None:
+        if self.match is None:
+            return
+        action = (instance.graph.index, node.pos)
+        if action == (0x0686, 40):
+            # 0686 sends its broadcast only when no directed message was selected.
+            broadcast = instance.graph.node(44).field("m_condition")
+            if not expr.truthy(instance.evaluate(broadcast)):
+                return
+            speaker = self.body
+        elif action == (0x05AD, 166):
+            # This directed fallback sends text without the preceding criteria action.
+            speaker = expr.to_entity(instance.evaluate(node.field("m_63CB0D07")))
+        else:
+            return
+        self.match.combat.voice.wheel(speaker, NEED_HEALING_CRITERION)
+
+    def action_criteria(self, instance: runtime.Instance, node: graph.Node) -> None:
+        if self.match is None or instance.graph.index not in (0x05AD, 0x0686):
+            return
+        speaker = expr.to_entity(instance.evaluate(node.field("m_targets")))
+        identifier = instance.evaluate(node.field("m_identifier"))
+        if isinstance(identifier, Asset):
+            self.match.combat.voice.wheel(speaker, identifier.guid)
+
+    def play_equipped_voice(self, instance: runtime.Instance) -> bool:
+        if self.match is None:
+            return False
+        query = instance.graph.node(67).field("m_value")
+        effect = instance.evaluate(query)
+        return isinstance(effect, Asset) and self.match.combat.voice.equipped(self.body, effect.guid)
 
     def velocity_action(self, instance, node):
         from ow174.game import mccree
@@ -1763,6 +1807,13 @@ def create_initial_graphs(component: runtime.Component, record: dict) -> list[ru
         if definition is None:
             continue
         values = {}
+        if definition.index == 0x004B and getattr(component.world, "communication_wheel", False):
+            # The wheel forwards these root schema values through 05AD and 069A to the owner camera.
+            schema = definition.fields.get("m_publicSchema") or {}
+            for entry in schema.get("m_entries") or ():
+                var = expr.guid_of(entry.get("m_0D09D2D9")) & 0xFFFF
+                if var in WHEEL_EMOTE_CAMERA_DEFAULTS:
+                    values[(INSTANCE, var)] = expr.evaluate(entry.get("m_value"), expr.Context())
         for entry in item.get("m_1EB5A024") or ():
             var = expr.guid_of(entry.get("m_0D09D2D9")) & 0xFFFF
             values[(INSTANCE, var)] = expr.evaluate(entry.get("m_value"), expr.Context())

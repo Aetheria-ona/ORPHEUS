@@ -1151,6 +1151,7 @@ class GameServer:
         scene_host_factory=None,
         on_clock_ready=None,
         emote_aliases_of=no_emote_aliases,
+        emote_unlocks_of=None,
         emote_blend_trees_of=None,
         wheel_cosmetics_of=no_wheel_cosmetics,
     ) -> None:
@@ -1166,6 +1167,7 @@ class GameServer:
         self.on_clock_ready = on_clock_ready
         self.skin_of = skin_of  # (account, hero) -> the equipped (skin theme, golden weapon); no locks
         self.emote_aliases_of = emote_aliases_of
+        self.emote_unlocks_of = emote_unlocks_of
         self.emote_blend_trees_of = emote_blend_trees_of
         self.wheel_cosmetics_of = wheel_cosmetics_of
         self.sock: socket.socket | None = None
@@ -1223,6 +1225,7 @@ class GameServer:
                 on_leave=self._left,
                 skin_of=self.skin_of,
                 emote_aliases_of=self.emote_aliases_of,
+                emote_unlocks_of=self.emote_unlocks_of,
                 emote_blend_trees_of=self.emote_blend_trees_of,
                 wheel_cosmetics_of=self.wheel_cosmetics_of,
                 card=card,

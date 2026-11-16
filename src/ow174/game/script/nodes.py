@@ -803,9 +803,9 @@ class RegisteredState(State):
         return {}
 
 
-@state_class("STU_9935FBC8", strict_only=True)
+@state_class("STU_9935FBC8")
 class CinematicAimLock(RegisteredState):
-    """Capture the zero-width yaw and pitch limits in Junkenstein cinematics."""
+    """Capture the authored zero-width yaw and pitch limits."""
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -814,11 +814,15 @@ class CinematicAimLock(RegisteredState):
     def on_begin(self):
         instance, node = self.instance, self.node
         component = instance.component
-        backend = component.world.property_modifiers(component.entity)
-        if ((instance.graph.index, node.pos) not in {(0x01CB, 12), (0x0CE0, 45), (0x0CA5, 70), (0x00CB, 21)}
-                or node.field("m_93CDFD2F") != 1
-                or node.field("m_4BE66EFF") is not None
-                or type(backend) is not modifiers.NumericModifiers):
+        placement = (instance.graph.index, node.pos)
+        emote = not component.strict and placement == (0x023A, 5)
+        if not component.strict and not emote:
+            return
+        supported = emote or (
+            placement in {(0x01CB, 12), (0x0CE0, 45), (0x0CA5, 70), (0x00CB, 21)}
+            and type(component.world.property_modifiers(component.entity)) is modifiers.NumericModifiers
+        )
+        if not supported or node.field("m_93CDFD2F") != 1 or node.field("m_4BE66EFF") is not None:
             component.unsupported(instance, "cinematic aim lock placement", node.cls, node)
         for field in ("m_C33684DE", "m_8FA7FF85", "m_D6119DFB", "m_83221709"):
             if self.evaluate(node.field(field), watch=False) != 0:
@@ -830,8 +834,13 @@ class CinematicAimLock(RegisteredState):
         self.aim = tuple((round(angle * 65536 / 360) + 32768) % 65536 - 32768 for angle in (yaw, pitch))
         super().on_begin()
 
+    def on_cleanup(self):
+        if self.aim is not None:
+            super().on_cleanup()
+            self.aim = None
+
     def payload(self):
-        return {"link": super().payload().get("link")}
+        return {"link": super().payload().get("link")} if self.aim is not None else {}
 
 
 @state_class("STU_1B93D61B")
@@ -3791,11 +3800,16 @@ class ClientOnlyPulser(State):
         self.pulse()
 
     def pulse(self) -> None:
+        wheel_voice = (self.instance.graph.index, self.node.pos) == WHEEL_VOICE_PULSE
+        world = self.instance.component.world
+        if wheel_voice and world.play_equipped_voice(self.instance):
+            # The reliable voice notice is the playback for this selection.
+            return
         self.pulses = (self.pulses + 1) & 0xFF
         frame_ms = self.instance.component.frame_ms
-        if (self.instance.graph.index, self.node.pos) == WHEEL_VOICE_PULSE:
+        if wheel_voice:
             self.pulsed_at = self.now
-            self.instance.component.world.replicate_frame_action(self.instance, self.node)
+            world.replicate_frame_action(self.instance, self.node)
         elif self.now // frame_ms > self.instance.start // frame_ms:
             self.pulsed_at = self.now
 
@@ -4369,7 +4383,10 @@ def cycle_index(instance: Instance, node, caller) -> bool:
         current = to_int(instance.find_var(*target).value())
         current = min(max(current, 0), count - 1)
         step = -1 if backwards else 1
-        for k in range(1, count + 1):
+        # The weapon manager's emote/death branch seeds node 70 with the body
+        # default, so test that slot before looking for another available one.
+        first = 0 if (instance.graph.index, node.pos) == (0x0015, 70) else 1
+        for k in range(first, first + count):
             candidate = (current + step * k) % count
             instance.params.append({None: candidate})
             try:
@@ -4855,8 +4872,13 @@ def hook_hit_telemetry(instance: Instance, node, caller) -> bool:
     return no_op(instance, node, caller)
 
 
+@handler("STUStatescriptActionCriteria")
+def action_criteria(instance: Instance, node, caller) -> bool:
+    instance.component.world.action_criteria(instance, node)
+    return no_op(instance, node, caller)
+
+
 for _name in (
-    "STUStatescriptActionCriteria",
     "STU_CEBDAF17",  # TrackStat
     "STU_6E5C5F66",  # 1B6EBA0 records optional trace data, then follows m_outPlug.
     "STU_D38D0035",  # 104319 inherits DD856C32's 1B6EBA0 base action.

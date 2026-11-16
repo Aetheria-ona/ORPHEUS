@@ -193,6 +193,15 @@ Source paths for the remaining actions
   and 069A:9. The selected action enters 069A via parameter 08FC as a
   one-item array. The slot reaches 023A through the subscript's variable
   9254. The owner stream carries 069A, its 023A child and 1040.
+  Build 104319's package request starts at D3FAB0. The 1040 query
+  resolves the pawn's possessor and reads the selected unlock on that
+  entity. In a local Practice Range session the player's controller
+  had component 65 and Mercy's pawn had no such component. Two crash
+  reports from the earlier body-create experiment identify the missing
+  component in the pawn's create. Apply the sparse unlock IDs only to
+  the controller's equipment fields 5 through 8 with the possession
+  update. The client can then use the normal package helper. The field
+  layout is described at https://rentry.co/z42v8ykq.
 - In 104319, the STU_250DEABD evaluator at CD7490 calls BCC930 for
   slots 0–3, resolves the equipped 0A5 unlock and checks STUUnlock_Emote.
   CD7B08 reads m_emote at +F8. When the m_7E3ED979 tag count is zero,
@@ -447,6 +456,15 @@ Source paths for the remaining actions
   then releases fire, ends the block and presses fire again. The authored
   023A:52 exit lasts 367 ms. The 023A:51 wait reaches the terminal
   action at 1000 ms and retires 023A, 069A and 1040.
+- While 023A holds entity var 1956, weapon manager 0015 initializes
+  the requested slot from the body default at node 68. Node 70 checks
+  that slot first and falls through to the next available slot if needed.
+  The regular next/previous weapon nodes still advance before checking.
+  Mercy's staff (006B) stays active through the Relax exit and the
+  single-shot Flurry and Caduceus replays. The decoded owner slot agrees
+  with the weapon state, and a normal switch selects the pistol (006D)
+  after the emote ends. The user confirmed the correct model for 「放松」
+  and 「权舞风起」 in the original 104319 Practice Range client.
 - The same PlayScript path now starts the self-targeted 0686 graph from
   05AD nodes 117 and 131. Their 05C5 message reaches 0686 node 33 and the
   graph selects the fixed, configurable or voice branch. Initializer 62
@@ -1159,3 +1177,32 @@ Remaining static work includes the original selection and targeting
 transport, callout delivery and recipient rules, the emote and cosmetic
 selection paths, and end-to-end offline fixtures for each action.
 Original-client acceptance is deferred.
+
+Player audio
+
+- In player matches, the authored 05AD and 0686 criterion actions now
+  resolve a voice stimulus through local 104319 data. Hello uses
+  0AEB/01CF, Thanks uses 1073/01D0, and ordinary Acknowledge uses
+  1078/02F2. The speaker's active skin and hero determine the voice
+  set. ClientInVoice 27500 carries the chosen line for the active
+  speaker and friendly listeners after the speaker's body is known.
+  The client chooses its localized sound from that line key.
+- Need Healing uses the stock 0724 voice criterion when 0686:40
+  reaches the broadcast branch or 05AD:166 reaches the directed
+  text-only branch. Directed branches with an authored voice criterion
+  keep that criterion. The two added paths reuse reliable 27500 delivery
+  and leave the effect and localized action in their existing sequence.
+- In the live 104319 client, an equipped choice can reach the 0686
+  pulse and report a zero effect in a 1313 message. In that case its
+  native lookup has no playable asset. The body host reads the equipped
+  effect from the authoritative loadout when the graph reaches the
+  pulse. The effect's voice chunk supplies the stimulus and the active
+  voice set supplies the line key. The server sends one reliable 27500
+  notice to each listener and omits the playback pulse for that choice.
+  Without that mapping, the original pulse and use-report path applies.
+  The installed 104319 client contains 139 distinct effects for 1,043
+  voice unlocks. Mercy's base slot resolves effect 18C4, stimulus 05A6
+  and line 7E05 on the tested Pink skin.
+- The synthetic match fixture checks ordinary and aimed callouts,
+  voice-set replacement, audience routing and equipped slot order.
+  Client 104319 reported line 7E05 after the equipped selection.

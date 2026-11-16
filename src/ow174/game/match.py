@@ -335,9 +335,17 @@ class Player:
                 first_pose = command.frame if dead else self.mover.first_step_frame(command.frame)
                 self._advance_body_gap(first_pose)
                 aim_lock = getattr(self.match.scene_host, 'player_aim_lock', None)
-                if not dead and aim_lock is not None and (locked := aim_lock(self)) is not None:
-                    yaw, pitch = locked
-                    command = replace(command, yaw=yaw, pitch=pitch, click_yaw=None, click_pitch=None)
+                if not dead:
+                    locked = aim_lock(self) if aim_lock is not None else None
+                    if locked is None and script is not None:
+                        locks = script.component.state_registries.get("STU_9935FBC8", ())
+                        locked = next((
+                            state.aim for state in locks
+                            if state.instance.graph.index == 0x023A and state.aim is not None
+                        ), None)
+                    if locked is not None:
+                        yaw, pitch = locked
+                        command = replace(command, yaw=yaw, pitch=pitch, click_yaw=None, click_pitch=None)
                 hook_victim = getattr(self.match.scene_host, 'hook_victim', None)
                 hooked = hook_victim is not None and hook_victim(self) is not None
                 if not dead and (self.body_script is not None or hooked):
@@ -473,6 +481,7 @@ class Match:
         collision_provider: CollisionProvider | None = None,
         scene_host_factory=None,
         emote_aliases_of=no_emote_aliases,
+        emote_unlocks_of=None,
         emote_blend_trees_of=None,
         wheel_cosmetics_of=no_wheel_cosmetics,
     ) -> None:
@@ -487,6 +496,7 @@ class Match:
         # The client's hero select equips a skin through the lobby (24500), even in a match.
         self.skin_of = skin_of
         self.emote_aliases_of = emote_aliases_of
+        self.emote_unlocks_of = emote_unlocks_of
         self.emote_blend_trees_of = emote_blend_trees_of
         self.wheel_cosmetics_of = wheel_cosmetics_of
         self.controller = heroselect.controller_of(game_map.mode_guid)
@@ -851,12 +861,14 @@ class Match:
         tag = player.card.get("+0x40") or player.name or None
         return [player.player_id, tag, player.card.get("+0x38"), None, None, None, None, rating, place, tier]
 
-    @staticmethod
-    def _possession(player: Player) -> dict:
-        """Components 44 (the body the player possesses, views and controls) and 75 (its hero, skin
-        theme and the last valid hero)."""
+    def _possession(self, player: Player) -> dict:
+        """The controller's body, hero, skin and equipped emotes."""
         theme = player.skin[0] or None
-        return {44: [player.body] * 3, 75: [player.hero.guid, theme, None, player.hero.guid]}
+        components = {44: [player.body] * 3, 75: [player.hero.guid, theme, None, player.hero.guid]}
+        if self.emote_unlocks_of is not None:
+            slots = self.emote_unlocks_of(player.account_lo, player.hero.guid)[:4]
+            components[world.EQUIPPED_COSMETICS] = [None] * 5 + list(slots) + [0] * (4 - len(slots))
+        return components
 
     def _board(self, player: Player) -> list:
         """Component 64's board fields for the player's own client (stats.py): the mode's player stats

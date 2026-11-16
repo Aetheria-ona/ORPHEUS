@@ -72,7 +72,8 @@ def _names(text):
 FIELDS = {
     GameServer: _names(
         "environment collision_provider_factory scene_host_factory host port on_leave on_join on_clock_ready "
-        "skin_of emote_aliases_of emote_blend_trees_of wheel_cosmetics_of sock lock handoffs clients "
+        "skin_of emote_aliases_of emote_unlocks_of emote_blend_trees_of wheel_cosmetics_of "
+        "sock lock handoffs clients "
         "_dropped matches tick _next_conn _left_players _joined_players _reporting_players "
         "_clock_ticks_left _clock_ready_pending _sent_home running"
     ),
@@ -86,7 +87,8 @@ FIELDS = {
         "stream source live volleys death_frames death_snapshot nameplate_update historical_death"
     ),
     Match: _names(
-        "environment id game_map card skin_of emote_aliases_of emote_blend_trees_of wheel_cosmetics_of tick "
+        "environment id game_map card skin_of emote_aliases_of emote_unlocks_of "
+        "emote_blend_trees_of wheel_cosmetics_of tick "
         "controller assemble_ends assembled players _body_messages started on_leave ended bots "
         "_npc_planning_turn "
         "_pending_bot_scripts bots_shown notices combat collision_provider collision_state collision_world "
@@ -464,6 +466,7 @@ def export_server_state(server, *, archives=(), collision_provider=None, assets=
             _fail('shared scene script runtime storage is not implemented')
         if (match.environment is not server.environment or match.skin_of is not server.skin_of
                 or match.emote_aliases_of is not server.emote_aliases_of
+                or match.emote_unlocks_of is not server.emote_unlocks_of
                 or match.emote_blend_trees_of is not server.emote_blend_trees_of
                 or match.wheel_cosmetics_of is not server.wheel_cosmetics_of):
             _fail("match external boundaries differ from its controlled server")
@@ -471,7 +474,8 @@ def export_server_state(server, *, archives=(), collision_provider=None, assets=
             _fail("match has an unregistered external collision provider")
     boundaries = {
         "environment": server.environment, "socket": server.sock, "domain_lock": server.lock,
-        "emotes": server.emote_aliases_of, "emote_blend_trees": server.emote_blend_trees_of,
+        "emotes": server.emote_aliases_of, "emote_unlocks": server.emote_unlocks_of,
+        "emote_blend_trees": server.emote_blend_trees_of,
         "wheel_cosmetics": server.wheel_cosmetics_of,
         "skin": server.skin_of, "joined_callback": server.on_join, "left_callback": server.on_leave,
         "clock_ready_callback": server.on_clock_ready,
