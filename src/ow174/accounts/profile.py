@@ -12,6 +12,59 @@ log = logging.getLogger(__name__)
 DEFAULT_ICON = 0x02500000000002F7
 # Profiles saved before this marker was written had their unlocks reset once.
 UNLOCKS_RESET_MARKER = "unlocks_reset_v2"
+_INT32_MIN = -(1 << 31)
+_UINT32_MAX = (1 << 32) - 1
+_INT32_SIGN_BIT = 1 << 31
+_INT64_MIN = -(1 << 63)
+_INT64_SIGN_BIT = 1 << 63
+_UINT64_MAX = (1 << 64) - 1
+
+
+def _parse_int_field(raw: object, field_name: str, minimum: int, maximum: int) -> int:
+    if isinstance(raw, bool):
+        raise ValueError(f"{field_name} must be an integer, got bool")
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise ValueError(f"{field_name} must not be empty")
+        base = 16 if text.lower().startswith(("0x", "-0x", "+0x")) else 10
+        value = int(text, base)
+    else:
+        raise ValueError(f"{field_name} must be an integer or numeric string")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{field_name} out of range [{minimum}, {maximum}]: {value}")
+    return value
+
+
+def normalize_setting_key(raw: object) -> int:
+    """Parse a +0x130 compound key and normalize it to signed 32-bit int."""
+    value = _parse_int_field(raw, "+0x8", _INT32_MIN, _UINT32_MAX)
+    return value - (1 << 32) if value >= _INT32_SIGN_BIT else value
+
+
+def normalize_setting_value(raw: object) -> int:
+    """Parse a +0x130 value and normalize it to signed 64-bit int."""
+    value = _parse_int_field(raw, "+0x0", _INT64_MIN, _UINT64_MAX)
+    return value - (1 << 64) if value >= _INT64_SIGN_BIT else value
+
+
+def normalize_setting_entries(entries: object) -> list[dict[str, int]]:
+    """Canonicalize +0x130 entries into [{"+0x0": int, "+0x8": int}, ...]."""
+    if not isinstance(entries, list):
+        raise ValueError("settings['+0x130'] must be a list")
+    normalized = []
+    for entry in entries:
+        if not isinstance(entry, dict) or "+0x0" not in entry or "+0x8" not in entry:
+            raise ValueError("each settings['+0x130'] entry must have '+0x0' and '+0x8'")
+        normalized.append(
+            {
+                "+0x0": normalize_setting_value(entry["+0x0"]),
+                "+0x8": normalize_setting_key(entry["+0x8"]),
+            }
+        )
+    return normalized
 
 
 def battle_tag(nickname: str, account_lo: int) -> str:
@@ -94,6 +147,13 @@ class Profile:
         for key in ("icon_guid", "frame_guid"):  # saved as hex text
             if key in values:
                 values[key] = int(str(values[key]), 0)
+        if "settings" in values and values["settings"] is not None:
+            if not isinstance(values["settings"], dict):
+                raise ValueError("profile.settings must be a dict")
+            settings = dict(values["settings"])
+            if "+0x130" in settings and settings["+0x130"] is not None:
+                settings["+0x130"] = normalize_setting_entries(settings["+0x130"])
+            values["settings"] = settings
         return cls(**values)
 
     def to_dict(self) -> dict:
@@ -116,8 +176,22 @@ def new_profile() -> Profile:
     return Profile(next_box_id=next_id, loot_boxes=boxes, events=["goodbye", "halloween"])
 
 
+def _sanitize_saved_settings(data: dict) -> None:
+    settings = data.get("settings")
+    if not isinstance(settings, dict) or not isinstance(settings.get("+0x130"), list):
+        return
+    kept = []
+    for entry in settings["+0x130"]:
+        try:
+            kept.extend(normalize_setting_entries([entry]))
+        except ValueError as error:
+            log.warning("Skipping invalid +0x130 setting entry: %s", error)
+    settings["+0x130"] = kept
+
+
 def _load_profile(path: Path) -> Profile:
     data = json.loads(path.read_text(encoding="utf-8"))
+    _sanitize_saved_settings(data)
     profile = Profile.from_dict(data)
     if data.get(UNLOCKS_RESET_MARKER) is not True:
         profile.unlocked_items = []
