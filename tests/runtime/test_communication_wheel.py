@@ -1778,6 +1778,7 @@ class CommunicationWheelTests(unittest.TestCase):
                     self.assertEqual(remote_callout.states[13], pulse)
 
     def test_voice_pulse_retries_with_its_slot_until_each_stream_acknowledges(self):
+        self.enterContext(patch("ow174.game.voicelines.player_voice_catalog", return_value={}))
         run = Run(names=("Speaker",))
         (player,) = run.players
         body = player.body_script

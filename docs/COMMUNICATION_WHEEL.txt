@@ -1177,3 +1177,32 @@ Remaining static work includes the original selection and targeting
 transport, callout delivery and recipient rules, the emote and cosmetic
 selection paths, and end-to-end offline fixtures for each action.
 Original-client acceptance is deferred.
+
+Player audio
+
+- In player matches, the authored 05AD and 0686 criterion actions now
+  resolve a voice stimulus through local 104319 data. Hello uses
+  0AEB/01CF, Thanks uses 1073/01D0, and ordinary Acknowledge uses
+  1078/02F2. The speaker's active skin and hero determine the voice
+  set. ClientInVoice 27500 carries the chosen line for the active
+  speaker and friendly listeners after the speaker's body is known.
+  The client chooses its localized sound from that line key.
+- Need Healing uses the stock 0724 voice criterion when 0686:40
+  reaches the broadcast branch or 05AD:166 reaches the directed
+  text-only branch. Directed branches with an authored voice criterion
+  keep that criterion. The two added paths reuse reliable 27500 delivery
+  and leave the effect and localized action in their existing sequence.
+- In the live 104319 client, an equipped choice can reach the 0686
+  pulse and report a zero effect in a 1313 message. In that case its
+  native lookup has no playable asset. The body host reads the equipped
+  effect from the authoritative loadout when the graph reaches the
+  pulse. The effect's voice chunk supplies the stimulus and the active
+  voice set supplies the line key. The server sends one reliable 27500
+  notice to each listener and omits the playback pulse for that choice.
+  Without that mapping, the original pulse and use-report path applies.
+  The installed 104319 client contains 139 distinct effects for 1,043
+  voice unlocks. Mercy's base slot resolves effect 18C4, stimulus 05A6
+  and line 7E05 on the tested Pink skin.
+- The synthetic match fixture checks ordinary and aimed callouts,
+  voice-set replacement, audience routing and equipped slot order.
+  Client 104319 reported line 7E05 after the equipped selection.

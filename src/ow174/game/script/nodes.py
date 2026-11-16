@@ -3605,11 +3605,16 @@ class ClientOnlyPulser(State):
         self.pulse()
 
     def pulse(self) -> None:
+        wheel_voice = (self.instance.graph.index, self.node.pos) == WHEEL_VOICE_PULSE
+        world = self.instance.component.world
+        if wheel_voice and world.play_equipped_voice(self.instance):
+            # The reliable voice notice is the playback for this selection.
+            return
         self.pulses = (self.pulses + 1) & 0xFF
         frame_ms = self.instance.component.frame_ms
-        if (self.instance.graph.index, self.node.pos) == WHEEL_VOICE_PULSE:
+        if wheel_voice:
             self.pulsed_at = self.now
-            self.instance.component.world.replicate_wheel_event(self.instance, self.node)
+            world.replicate_wheel_event(self.instance, self.node)
         elif self.now // frame_ms > self.instance.start // frame_ms:
             self.pulsed_at = self.now
 
@@ -4586,8 +4591,13 @@ def hook_hit_telemetry(instance: Instance, node, caller) -> bool:
     return no_op(instance, node, caller)
 
 
+@handler("STUStatescriptActionCriteria")
+def action_criteria(instance: Instance, node, caller) -> bool:
+    instance.component.world.action_criteria(instance, node)
+    return no_op(instance, node, caller)
+
+
 for _name in (
-    "STUStatescriptActionCriteria",
     "STU_CEBDAF17",  # TrackStat
     "STU_6E5C5F66",  # 1B6EBA0 records optional trace data, then follows m_outPlug.
     "STU_D38D0035",  # 104319 inherits DD856C32's 1B6EBA0 base action.

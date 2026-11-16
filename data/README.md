@@ -18,6 +18,25 @@ directory with `--categories` pointing to the `.015` directory. Its `--clips-out
 and `--scalar-output` options write the two additional tables. Restart the server
 after installing the tables so it reloads the loadout mappings.
 
+## Optional player voice data
+
+Place `player_voice_174.json` and `voice_effects_174.json` in the runtime's
+`data/` directory. The first maps wheel criteria and equipped effects
+to line keys in the current hero's voice set.
+The second maps equipped voice-line unlocks to their playback effects.
+Runtime preparation copies both files when present.
+
+To generate the tables, use [the player voice extractor](../tools/extract_player_voice.cs)
+as `Program.cs` in a .NET 10 console project with implicit usings enabled.
+Reference the local OWLib build's DataTool, TankLib and TACTLib assemblies
+and place its runtime dependencies alongside the extractor. Run it with the
+local 104319 installation directory and the existing runtime `data/`
+directory as the two arguments. The extractor reads the packaged assets
+with DataTool's offline storage mode. It takes the line keys from the
+05F voice set's parallel `F7FA2CAC` array, reads wheel criteria from
+078 stimulus resources, and resolves equipped cues from the voice chunks
+of their 00D effects. Keep both generated tables in local runtime storage.
+
 ## Generate client catalogs
 
 The four catalog files can be generated from your authorized 104319 installation. Use the [pinned OWLib source](https://github.com/overtools/OWLib/tree/7afe5f52706e7002ed8c2717299cd60846f3fa3a) with its submodules and the x64 .NET 6 SDK.
