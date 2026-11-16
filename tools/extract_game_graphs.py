@@ -902,9 +902,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, help="destination bundle")
     args = parser.parse_args()
     output = args.output or OUT
-    if args.entity and output.resolve() == OUT.resolve():
-        parser.error("--entity requires --output outside the canonical hero bundle")
-    for option, source in (("--mode-xml", args.mode_xml), ("--ai-spawners", args.ai_spawners)):
+    for option, source in (
+        ("--entity", args.entity or None),
+        ("--mode-xml", args.mode_xml),
+        ("--ai-spawners", args.ai_spawners),
+    ):
         if source is not None and (args.output is None or output.resolve().is_relative_to(ROOT)):
             parser.error(f"{option} requires --output outside the repository")
     if args.map_entities:

@@ -1,7 +1,12 @@
 """Actual grenade flight/airburst and storage of new projectile motion state."""
 
 import math
+import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_mccree_combat as scenes
 
