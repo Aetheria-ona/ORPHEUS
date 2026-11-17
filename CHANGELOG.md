@@ -6,6 +6,14 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-16
 
+#### A failing match command answers one line, not a traceback
+
+- A raising match command used to escape the handler, and the connection's traceback reply
+  arrived unsplittable: a chat frame longer than the channel's slice carries no control bytes,
+  the lobby channel dies from that point on, and every later command looks like it did nothing
+  (learned live from a `.body` probe). The dispatch now answers one log line on failure, and
+  every private reply is capped at 200 characters at the single `_private_reply` funnel.
+
 #### Training Bot death frames survive the reliable-record loss
 
 - A bot's death pulse now goes out as a full body frame until its feed instance reaches the
