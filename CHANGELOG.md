@@ -4,6 +4,14 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-17
+
+#### Ported StateScript shared behavior contracts to main
+
+- Copied the 20 compatible synthetic behavior fixtures from `rust` into `fixtures/behavior/` and ported the 19 matching `scripts/check_*_contract.py` checks into `tests/public/test_statescript_vm_contracts.py`, `tests/public/test_statescript_entity_contracts.py`, and `tests/public/test_statescript_combat_contracts.py` (with `ORPHEUS_BEHAVIOR_FIXTURES` support and no `ORPHEUS_RUNTIME_DIR` dependency).
+- Left `check_body_field_contract.py` and `check_spatial_owner_absence_contract.py` out of this batch because they depend on unmerged Draft #32 methods (`STU_00707E1E` / `declare_spatial_binding_owner_absent`).
+- Passed Ruff, 974 public Python tests (`skipped=3` on Linux: `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy` plus 2 Rust-only adapter boundary subtests in `test_flashbang_entry_guard_contract`), and `python -S` contract checks against both local and `rust` fixture directories.
+
 ### 2026-11-16
 
 #### Communication and equipped voice wheels
