@@ -56,7 +56,7 @@ from ow174.game.match import (
 from ow174.game.npc_navigation import RIALTO_MAP
 from ow174.game.projectiles import MAX_LEASE_FRAME, MINE_FIRST, MINE_SPAN, _ObservedProjectile
 from ow174.game.script.bot import practice_nameplate
-from ow174.game.script.driver import BodyStream, Snapshot, warm_up
+from ow174.game.script.driver import KILL_FEED_PULSERS, BodyStream, Snapshot, warm_up
 from ow174.jam.codec import DecodeError
 from ow174.jam.values import to_jsonable
 
@@ -472,6 +472,35 @@ class Client:
         allowed = (not script.historical_death
                    and self.player.match.combat.kill_feed_allowed(self.player, stream.entity))
         snapshot = stream.kill_feed_snapshot(snapshot, allowed=allowed)
+        new_pulse = None
+        for owner, (graph_index, _) in snapshot.instances.items():
+            index = KILL_FEED_PULSERS.get(graph_index)
+            if (index is not None and snapshot.states.get((owner, index), (None, False))[1]
+                    and (stream.base is None
+                         or ((owner, index) not in stream.base.states
+                             and owner not in stream.base.instances))):
+                new_pulse = owner
+                break
+        if allowed and stream.base is not None and new_pulse is not None:
+            # The death delta introduces the feed pulser instance (0C18) the client's body does
+            # not carry at create. The memory sampler in docs/research/kill-feed.md shows such a
+            # delta is dropped whenever its datagram carries any reliable record: the datagram is
+            # acknowledged, the chunk is never re-offered, and the pump refuses every later
+            # delta. A full frame has first frame 0 and always passes the pump — the only form
+            # that drew the line at every kill in those runs. Send the whole body until the
+            # instance reaches the acknowledged base; after that the delta path is safe again.
+            # Same reason as commit e3c05af, this time for bodies the spawner made again: the
+            # interleaving keeps one death chunk out of a messages datagram, but every re-kill
+            # draws the lottery again; the full frame removes it.
+            snapshot = self._project_bot_snapshot(snapshot, known=stream.base)
+            if script.nameplate_update is not None:
+                self.cancel_entity_record(script.nameplate_update)
+                stream.pending.pop(script.nameplate_update.chunk_last, None)
+                script.nameplate_update = None
+            frame = observers.full_frame(script.source, snapshot)
+            script.death_snapshot = snapshot
+            stream.full(frame, snapshot)
+            return True
         return self._queue_bot_snapshot(script, snapshot, known=known)
 
     def _bot_nameplates_enabled(self) -> bool:
