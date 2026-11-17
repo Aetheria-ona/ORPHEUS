@@ -4,6 +4,11 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-18
+
+- Send the four equipped spray slots in the controller possession update and clear empty slots on hero switch. When the server receives a confirmed spray, use the command pose associated with the first packet and apply the original 104319 eye spring offset. Reuse that frame through reliable retries and fall back to the current pose if the history entry is unavailable.
+- Spray placement can still drift after abilities that cause the client prediction and the server movement simulation to diverge, including Echo's Flight, Pharah's Jump Jet, Sigma's Gravitic Flux and Mercy's Valkyrie. Fixing that drift requires closer agreement between the two movement simulations.
+
 ### 2026-11-17
 
 #### Ported StateScript shared behavior contracts to main

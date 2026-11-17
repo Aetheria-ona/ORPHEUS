@@ -1295,6 +1295,33 @@ class CommunicationWheelTests(unittest.TestCase):
             voice.write((expr.INSTANCE, 29699), expr.Asset(0x0A90000000000000 | action))
             self.assertEqual(voice.evaluate(voice_query), expr.Asset(expected))
 
+    def test_hero_possession_sends_and_clears_equipped_sprays(self):
+        fixtures = Path(os.environ.get("ORPHEUS_BEHAVIOR_FIXTURES")
+                        or Path(__file__).resolve().parents[2] / "fixtures/behavior")
+        fixture = json.loads((fixtures / "wheel-spray-possession-v1.json").read_text(encoding="utf-8"))
+        loadouts = {int(row["hero"], 16): row for row in fixture["input"]}
+        match = Match(
+            PRACTICE_RANGE,
+            collision_provider=StaticCollisionProvider(flat_world(1.0)),
+            wheel_cosmetics_of=lambda _, hero: (
+                tuple(int(slot, 16) for slot in loadouts[hero]["sprays"]), ()
+            ),
+            emote_unlocks_of=lambda _, hero: tuple(int(slot, 16) for slot in loadouts[hero]["emotes"]),
+        )
+        player = match.add_player(1, "Soldier", SOLDIER, 0, False)
+        in_world(match, player)
+        for hero, expected in zip(loadouts, fixture["expected"], strict=True):
+            with self.subTest(hero=hex(hero)):
+                player.client.entities.clear()
+                self.assertTrue(match.switch_hero(player, heroes()[hero]))
+                [possession] = [update for update in player.client.entities
+                                if update.entity == player.entity and update.op == game_world.OP_UPDATE]
+                with patch.object(game_world, "update", wraps=game_world.update) as write_update:
+                    possession.build(0)
+                cosmetics = write_update.call_args.args[1][game_world.EQUIPPED_COSMETICS]
+                update = game_world.update(0, {game_world.EQUIPPED_COSMETICS: cosmetics})
+                self.assertEqual(update.getvalue().hex(), expected["controller_cosmetics_update_hex"])
+
     def test_spray_selection_places_on_the_nearest_eligible_static_surface(self):
         def wall(z):
             return (-3, 0, z, 3, 0, z, -3, 4, z), (3, 0, z, 3, 4, z, -3, 4, z)

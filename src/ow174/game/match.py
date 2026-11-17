@@ -59,6 +59,7 @@ from ow174.game.environment import ExecutionEnvironment, SystemEnvironment
 from ow174.game.mover import (
     CROUCHED,
     GRAVITY_SCALE,
+    SPRING_STEPS,
     Mover,
     MoverData,
     mover_data,
@@ -73,6 +74,7 @@ from ow174.game.script.driver import (
     DOOMFIST_PASSIVE_GRAPH,
     WHEEL_ACTION_CATEGORIES,
     WHEEL_ACTION_PREFIX,
+    WHEEL_SPRAY_ACTIONS,
     BodyScript,
     CommandEpochError,
 )
@@ -507,6 +509,7 @@ class Match:
         self.players: list[Player] = []
         self._body_messages: list[
             tuple[BodyScript, Player, BodyScript, int | play.Request, dict | None, int | None]
+            | tuple[BodyScript, Player, BodyScript, int | play.Request, dict | None, int | None, int]
         ] = []
         self.started = self.environment.wall_time(callsite="match.started")
         self.on_leave = on_leave  # called with each player who leaves
@@ -862,12 +865,19 @@ class Match:
         return [player.player_id, tag, player.card.get("+0x38"), None, None, None, None, rating, place, tier]
 
     def _possession(self, player: Player) -> dict:
-        """The controller's body, hero, skin and equipped emotes."""
+        """The controller's body, hero, skin and equipped cosmetics."""
         theme = player.skin[0] or None
         components = {44: [player.body] * 3, 75: [player.hero.guid, theme, None, player.hero.guid]}
+        slots = [None] * 9
+        if self.wheel_cosmetics_of is not no_wheel_cosmetics:
+            sprays, _ = self.wheel_cosmetics_of(player.account_lo, player.hero.guid)
+            sprays = sprays[:4]
+            slots[:4] = list(sprays) + [0] * (4 - len(sprays))
         if self.emote_unlocks_of is not None:
-            slots = self.emote_unlocks_of(player.account_lo, player.hero.guid)[:4]
-            components[world.EQUIPPED_COSMETICS] = [None] * 5 + list(slots) + [0] * (4 - len(slots))
+            emotes = self.emote_unlocks_of(player.account_lo, player.hero.guid)[:4]
+            slots[5:] = list(emotes) + [0] * (4 - len(emotes))
+        if any(slot is not None for slot in slots):
+            components[world.EQUIPPED_COSMETICS] = slots
         return components
 
     def _board(self, player: Player) -> list:
@@ -1256,15 +1266,25 @@ class Match:
         mover = self._script_body_mover(owner, owner)
         return mover.movement_sample() if mover is not None else None
 
-    def resolve_body_spray(self, entity: int, length: float) -> dict | None:
+    def resolve_body_spray(
+        self, entity: int, length: float, *, command_frame: int | None = None,
+    ) -> dict | None:
         collision = self.collision_world
         player = next((player for player in self.players if player.body == entity and player.has_body), None)
         if collision is None or player is None or self.combat.is_dead(player):
             return None
         mover = player.mover
         x, y, z = mover.position
-        origin = (x, y + combat.eye_height(player.hero.body, mover.crouched), z)
-        direction = combat.aim(mover.yaw, mover.pitch)
+        yaw, pitch, crouched, spring = mover.yaw, mover.pitch, mover.crouched, mover.spring
+        if command_frame is not None:
+            pose = next((pose for pose in reversed(mover.history) if pose.frame == command_frame), None)
+            if pose is not None:
+                x, y, z = pose.position
+                yaw, pitch, crouched = pose.yaw, pose.pitch, bool(pose.flags & CROUCHED)
+                low = mover.spring_low
+                spring = expr.f32(expr.f32((mover.spring_high - low) * (pose.spring[0] / SPRING_STEPS)) + low)
+        origin = (x, y + combat.eye_height(player.hero.body, crouched) + spring, z)
+        direction = combat.aim(yaw, pitch)
         spray_geometry = collision.ray_geometry or collision
         hit = spray_geometry.cast_ray(origin, direction, length, spray_placement.SURFACE_CATEGORY)
         if hit is None:
@@ -1314,8 +1334,9 @@ class Match:
 
     def queue_body_message(
         self, target: int, message: int, params: dict, sender: int, *, target_instance: int | None = None,
+        spray_frame: int | None = None,
     ) -> bool:
-        return self._queue_body_delivery(target, sender, message, dict(params), target_instance)
+        return self._queue_body_delivery(target, sender, message, dict(params), target_instance, spray_frame)
 
     def queue_body_play(self, sender: int, request: play.Request) -> None:
         for entity in request.targets:
@@ -1323,7 +1344,7 @@ class Match:
 
     def _queue_body_delivery(
         self, target: int, sender: int, message: int | play.Request, params: dict | None,
-        target_instance: int | None,
+        target_instance: int | None, spray_frame: int | None = None,
     ) -> bool:
         """Capture the source and recipient scripts before either entity ID can be reused."""
         source, recipient = self._message_player(sender), self._message_player(target)
@@ -1335,7 +1356,8 @@ class Match:
         if len(self._body_messages) >= MAX_BODY_MESSAGES:
             expr.warn_once("body-message-limit", "match body message queue reached %d", MAX_BODY_MESSAGES)
             return False
-        self._body_messages.append((source_script, recipient, script, message, params, target_instance))
+        delivery = (source_script, recipient, script, message, params, target_instance)
+        self._body_messages.append(delivery if spray_frame is None else (*delivery, spray_frame))
         return True
 
     def deliver_body_messages(self) -> None:
@@ -1344,11 +1366,13 @@ class Match:
             return
         pending, self._body_messages = self._body_messages, []
         # Messages emitted by a receiver enter the next batch, outside its VM call stack.
-        for source, player, script, message, params, target_instance in pending:
+        for source, player, script, message, params, target_instance, *arrival in pending:
             if source.retired or source.component.fault is not None:
                 continue
             if player.body_script is not script or script.retired or not self._shown(player):
                 continue
+            if arrival:
+                script.world.spray_command_frame = arrival[0]
             try:
                 component = script.component
                 if isinstance(message, play.Request):
@@ -1369,6 +1393,9 @@ class Match:
             except Exception:
                 log.exception("[game] %s: %s's body message handling failed", self.label(), player.name)
                 self.stop_body_script(player, failed=True)
+            finally:
+                if arrival:
+                    del script.world.spray_command_frame
 
     def start_body_script(self, player: Player, create: EntityUpdate) -> None:
         """The statescript of the player's new body; the old body's stops. It runs from
@@ -1463,19 +1490,21 @@ class Match:
             log.exception("[game] %s: %s's body statescript failed", self.label(), player.name)
             self.stop_body_script(player, failed=True)
 
-    def communication_action(self, player: Player, value: dict) -> None:
+    def communication_action(self, player: Player, value: dict, *, command_frame: int | None = None) -> None:
         """Deliver a 21608 wheel action on the sender's current body."""
         action = value["+0x78"]
         if action & ~0xFFFFFFFF != WHEEL_ACTION_PREFIX:
             return
-        if not any((action & 0xFFFFFFFF) in actions for actions in WHEEL_ACTION_CATEGORIES.values()):
+        option = action & 0xFFFFFFFF
+        if not any(option in actions for actions in WHEEL_ACTION_CATEGORIES.values()):
             return
         params = {0x8FC: expr.Asset(action), 0x3E1: value["+0x80"]}
         if action == (WHEEL_ACTION_PREFIX | 0x170):
             marker = (value.get("+0x84") or {}).get("+0x0", 0)
             if marker:
                 params[0x644] = expr.Entity(marker)
-        self.queue_body_message(player.body, 0x02400000000002A3, params, player.body)
+        spray_frame = command_frame if option in WHEEL_SPRAY_ACTIONS and value["+0x80"] else None
+        self.queue_body_message(player.body, 0x02400000000002A3, params, player.body, spray_frame=spray_frame)
 
     def _wheel_use_report(self, player: Player, value: dict, parameters: bytes) -> None:
         # 904C20 uses the default message header, then one 053B Asset row.

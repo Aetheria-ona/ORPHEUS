@@ -392,9 +392,11 @@ class BodyWorld(runtime.World):
         )
         return Vec3(*point) if point is not None else None
 
+    spray_command_frame: int | None = None  # scoped to delivery of a confirmed wheel selection
+
     def resolve_spray(self, length: float) -> dict | None:
         if self.communication_wheel and self.match is not None:
-            return self.match.resolve_body_spray(self.body, length)
+            return self.match.resolve_body_spray(self.body, length, command_frame=self.spray_command_frame)
         return None
 
     def queue_velocity_changes(

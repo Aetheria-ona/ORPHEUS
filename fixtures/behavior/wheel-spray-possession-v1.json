@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "case_id": "wheel-spray-possession-v1",
+  "target_build": 104319,
+  "source": {
+    "revision": "61c1d6a72319f43f7b4ec013d75500873b3f2b02",
+    "paths": ["src/ow174/game/match.py", "src/ow174/game/world.py"],
+    "notes": "Synthetic unlocks encoded using the component 65 field order and sparse ID format. The initial loadout has an empty middle slot and a missing fourth slot. The next hero has no sprays and a different emote."
+  },
+  "evidence": "synthetic-reference",
+  "client_acceptance": "The original client reported distinct equipped Mercy sprays and Mei's spray after switching heroes in Practice Range. Visual placement and an empty loadout remain pending in the original client.",
+  "input": [
+    {
+      "hero": "0x02E000000000006E",
+      "sprays": ["0x0250000000000111", "0x0", "0x0250000000000222"],
+      "emotes": ["0x0250000000000333"]
+    },
+    {
+      "hero": "0x02E0000000000004",
+      "sprays": [],
+      "emotes": ["0x0250000000000444"]
+    }
+  ],
+  "expected": [
+    {"controller_cosmetics_update_hex": "014102ef01c31101500200c32202500200c333035002000000"},
+    {"controller_cosmetics_update_hex": "014102ef0100000000c344045002000000"}
+  ]
+}
