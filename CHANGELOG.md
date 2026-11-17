@@ -4,6 +4,14 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-17
+
+#### Custom-game emote weapons
+
+- Keep Mercy’s staff equipped during and after emotes in solo Hybrid. The 104319 pistol graph can set the combat default in that mode. Emotes check available slots from the first slot, and the weapon manager carries the equipped slot into normal play. The requested combat default still applies for startup or when no valid weapon is equipped.
+- Checked the local Match Protocol for equipped emotes and package loading. The weapon branch was traced in the extracted 104319 graphs. The owner-frame regression covers Relax (including its stand-up animation), Flurry and Caduceus in Practice Range and solo Hybrid, followed by a manual switch to the pistol. Original-client visual acceptance of the custom-game fix is pending.
+- Passed Ruff, 956 public Python tests, six JavaScript tests, 125 focused runtime tests and the runtime preflight.
+
 ### 2026-11-16
 
 #### A failing match command answers one line, not a traceback

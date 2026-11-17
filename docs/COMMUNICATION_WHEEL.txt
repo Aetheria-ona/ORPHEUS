@@ -456,15 +456,21 @@ Source paths for the remaining actions
   then releases fire, ends the block and presses fire again. The authored
   023A:52 exit lasts 367 ms. The 023A:51 wait reaches the terminal
   action at 1000 ms and retires 023A, 069A and 1040.
-- While 023A holds entity var 1956, weapon manager 0015 initializes
-  the requested slot from the body default at node 68. Node 70 checks
-  that slot first and falls through to the next available slot if needed.
-  The regular next/previous weapon nodes still advance before checking.
-  Mercy's staff (006B) stays active through the Relax exit and the
-  single-shot Flurry and Caduceus replays. The decoded owner slot agrees
-  with the weapon state, and a normal switch selects the pistol (006D)
-  after the emote ends. The user confirmed the correct model for 「放松」
-  and 「权舞风起」 in the original 104319 Practice Range client.
+- Weapon manager 0015 initializes the requested slot from the combat
+  default at node 68. Mercy's pistol graph (006D:78) can override that
+  default in solo Hybrid. While 023A holds entity var 1956 and the body
+  is alive, node 70 searches the authored availability array from slot
+  zero. Death still checks the combat default first, and the regular
+  next/previous nodes advance before checking. The local Match Protocol
+  covers emote slots and package loading. The weapon branch was traced
+  in the build 104319 graphs.
+  The decoded owner slot and weapon state keep the staff (006B) active
+  through the Relax exit and the Flurry and Caduceus replays in Practice
+  Range and solo Hybrid. The normal branch preserves the equipped slot
+  at 0015:71 and keeps that request on 0015:66's begin path. A manual switch
+  can select the pistol after the emote. Original-client acceptance
+  covers 「放松」 and 「权舞风起」 in Practice Range. The custom-game
+  fix awaits visual confirmation.
 - The same PlayScript path now starts the self-targeted 0686 graph from
   05AD nodes 117 and 131. Their 05C5 message reaches 0686 node 33 and the
   graph selects the fixed, configurable or voice branch. Initializer 62

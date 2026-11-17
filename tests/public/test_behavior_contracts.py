@@ -66,6 +66,69 @@ class JamFramingContractTests(unittest.TestCase):
         self.assertEqual(payloads, self.expected_payloads)
 
 
+class EmoteWeaponSelectionContractTests(unittest.TestCase):
+    def setUp(self):
+        self.contract = json.loads((FIXTURES / "emote-weapon-selection-v1.json").read_text(encoding="utf-8"))
+
+    def test_weapon_manager_uses_the_first_available_slot_for_emotes(self):
+        inputs = self.contract["input"]
+        slots = self.contract["expected"]["weapon_slots"]
+        target = {"$": "STUConfigVarDynamic", "m_identifier": 30, "m_60DB8F99": runtime.ENTITY}
+        for case, expected in zip(inputs["cases"], slots, strict=True):
+            with self.subTest(case=case["name"]):
+                action = node(
+                    case["node"], "STU_BC5E4622",
+                    m_D10618D1={"$": "STUConfigVarInt", "m_value": len(case["available"])},
+                    m_339A63DB=target,
+                    m_condition={"$": "STU_919FD47C", "m_expression": {
+                        "m_opcodes": [8, 0, 13, 1, 17, 0],
+                        "m_dynamicVars": [
+                            {"$": "STUConfigVarDynamic", "m_identifier": 29, "m_60DB8F99": runtime.ENTITY},
+                            {"$": "STUConfigVarDynamic", "m_identifier": 12, "m_60DB8F99": runtime.INSTANCE},
+                        ],
+                    }},
+                )
+                definition = graph([action])
+                definition.index = inputs["graph"]
+                component = runtime.Component(1)
+                component.set(29, tuple(case["available"]))
+                component.set(30, case["start"])
+                component.set(478, case["dead"])
+                component.set(1956, case["emoting"])
+                instance = component.create(definition, init=False)
+                instance.run_node(definition.node(case["node"]), None)
+                self.assertEqual(component.entity_var(30).value(), expected)
+
+    def test_entering_the_normal_branch_keeps_an_available_equipped_slot(self):
+        inputs = self.contract["input"]
+        slots = self.contract["expected"]["normal_entry_requested_slots"]
+        requested = {"$": "STUConfigVarDynamic", "m_identifier": 30, "m_60DB8F99": runtime.ENTITY}
+        equipped = {"$": "STUConfigVarDynamic", "m_identifier": 31, "m_60DB8F99": runtime.ENTITY}
+        default = {"$": "STUConfigVarDynamic", "m_identifier": 16515, "m_60DB8F99": runtime.ENTITY}
+        switch = plug((66, "m_inPlug"))
+        definition = graph([
+            node(14, "STU_2F4E2E3F", state=0, m_onBeginPlug=switch, m_A70DB860=switch),
+            node(66, "STUStatescriptActionSetVar", m_out_Var=requested, m_value=default),
+            node(71, "STU_12F5D52D", m_143D4C5B=[
+                {"m_out_Var": requested, "m_value": default},
+                {"m_out_Var": equipped, "m_value": {"$": "STUConfigVarInt", "m_value": 0}},
+            ]),
+        ])
+        definition.index = inputs["graph"]
+        for case, expected in zip(inputs["normal_entry_cases"], slots, strict=True):
+            with self.subTest(case=case["name"]):
+                component = runtime.Component(1)
+                component.set(29, tuple(case["available"]))
+                component.set(31, case["equipped"])
+                component.set(16515, case["default"])
+                instance = component.create(definition, init=False)
+                instance.run_node(definition.node(71), None)
+                instance.follow(definition.node(14), "m_onBeginPlug")
+                self.assertEqual(component.entity_var(30).value(), expected)
+                instance.follow(definition.node(14), "m_A70DB860")
+                self.assertEqual(component.entity_var(30).value(), case["default"])
+
+
 class SeismicSlamWaveContractTests(unittest.TestCase):
     def test_child_reads_new_targets_before_immediate_wave_finishes(self):
         contract = json.loads((FIXTURES / "seismic-slam-wave-v1.json").read_text(encoding="utf-8"))

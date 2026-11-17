@@ -4302,6 +4302,10 @@ def set_var(instance: Instance, node, caller) -> bool:
                 and instance.graph.index == 0x0C8C and node.pos == 263
                 and config == {'$': 'STU_7BD2CA19', 'm_resourceKey': None, 'm_EE729DCB': 0}):
             value = difficulty  # Supply the queue input at the original encounter assignment.
+        elif (not component.strict and (instance.graph.index, node.pos) == (0x0015, 66)
+              and instance.plug_source == (14, 'm_onBeginPlug')):
+            # Node 71 already chose the requested weapon on entry to this branch.
+            value = component.entity_var(30).value()
         else:
             value = play.evaluate_value(instance, config, initial=0)
         store(instance, target, value, node.fields.get("m_index"), node.fields.get("m_key"))
@@ -4340,10 +4344,22 @@ def store(instance: Instance, out_cfg, value, index_cfg=None, key_cfg=None) -> N
 @handler("STU_12F5D52D")
 def set_vars(instance: Instance, node, caller) -> bool:
     """1B6B560: each present target gets its +28 value, or int0 for missing/failure."""
+    equipped_slot = None
+    if not instance.component.strict and (instance.graph.index, node.pos) == (0x0015, 71):
+        # Returning to the normal branch after an emote or death keeps the slot
+        # already selected by the presentation branch. At spawn, no slot is equipped yet.
+        component = instance.component
+        active = component.entity_var(31).value()
+        available = component.entity_var(29).value()
+        if (type(active) is int and isinstance(available, tuple)
+                and 0 <= active < len(available) and available[active]):
+            equipped_slot = active
     for pair in node.fields.get("m_143D4C5B") or []:
         if isinstance(pair, dict) and pair.get("m_out_Var") is not None:
             config = pair.get("m_value")
             value = play.evaluate_value(instance, config, initial=0) if config is not None else 0
+            if equipped_slot is not None and lvalue(pair["m_out_Var"]) == (expr.ENTITY, 30):
+                value = equipped_slot
             store(instance, pair["m_out_Var"], value)
     instance.follow(node, "m_outPlug", None)
     return True
@@ -4383,9 +4399,14 @@ def cycle_index(instance: Instance, node, caller) -> bool:
         current = to_int(instance.find_var(*target).value())
         current = min(max(current, 0), count - 1)
         step = -1 if backwards else 1
-        # The weapon manager's emote/death branch seeds node 70 with the body
-        # default, so test that slot before looking for another available one.
-        first = 0 if (instance.graph.index, node.pos) == (0x0015, 70) else 1
+        first = 1
+        if (instance.graph.index, node.pos) == (0x0015, 70):
+            first = 0
+            component = instance.component
+            if not truthy(component.entity_var(478).value()) and truthy(component.entity_var(1956).value()):
+                # Emotes use the first available weapon. The combat default seeded by node 68
+                # can be the pistol (Mercy's 006D:78), and is still used by the death branch.
+                current = 0
         for k in range(first, first + count):
             candidate = (current + step * k) % count
             instance.params.append({None: candidate})

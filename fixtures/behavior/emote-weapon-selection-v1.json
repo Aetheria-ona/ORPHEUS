@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "case_id": "emote-weapon-selection-v1",
+  "target_build": 104319,
+  "source": {
+    "revision": "b28139d4fa230480c0cea147d369724f97569c30",
+    "paths": ["src/ow174/game/script/nodes.py", "src/ow174/game/script/driver.py"],
+    "notes": "The local Match Protocol describes emote slots and package loading. Weapon slot selection was traced in the 104319 graphs. Mercy's 006D:78 can set the combat default to slot 2 in solo Hybrid. The 0015:70 emote pass checks availability from slot zero. On returning to the normal branch, 0015:71 and the initial 0015:66 pass preserve the equipped slot when available. Death selection and normal cycling retain their previous start positions."
+  },
+  "evidence": "synthetic-reference",
+  "client_acceptance": "pending",
+  "input": {
+    "graph": 21,
+    "cases": [
+      {"name": "practice_emote", "node": 70, "start": 1, "available": [false, true, true], "emoting": true, "dead": false},
+      {"name": "custom_emote", "node": 70, "start": 2, "available": [false, true, true], "emoting": true, "dead": false},
+      {"name": "unavailable_staff", "node": 70, "start": 2, "available": [false, false, true], "emoting": true, "dead": false},
+      {"name": "dead_during_emote", "node": 70, "start": 2, "available": [false, true, true], "emoting": true, "dead": true},
+      {"name": "manual_cycle", "node": 13, "start": 1, "available": [false, true, true], "emoting": false, "dead": false}
+    ],
+    "normal_entry_cases": [
+      {"name": "custom_emote_finished", "equipped": 1, "default": 2, "available": [false, true, true]},
+      {"name": "startup", "equipped": null, "default": 2, "available": [false, true, true]},
+      {"name": "equipped_unavailable", "equipped": 1, "default": 2, "available": [false, false, true]},
+      {"name": "return_from_death", "equipped": 2, "default": 2, "available": [false, true, true]}
+    ]
+  },
+  "expected": {
+    "weapon_slots": [1, 1, 2, 2, 2],
+    "normal_entry_requested_slots": [1, 2, 2, 2]
+  }
+}
