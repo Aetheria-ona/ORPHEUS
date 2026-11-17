@@ -6,6 +6,17 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-16
 
+#### Training Bot death frames survive the reliable-record loss
+
+- A bot's death pulse now goes out as a full body frame until its feed instance reaches the
+  acknowledged base. The memory sampler in the kill-feed note shows a delta is dropped whenever
+  its datagram carries any reliable record, the datagram is acknowledged, and the pump then
+  refuses every later delta for that body; e3c05af keeps the first death chunk out of a
+  messages datagram, but each re-kill draws that lottery again. A full frame has first frame 0
+  and always passes the pump — the only form that drew the line at every kill in those runs.
+  Seen on the original client (Aksuma's stand, 2026-11-16): kills of spawner-made-again bodies
+  drew no line before and draw one after, ring and nameplate intact.
+
 #### Communication and equipped voice wheels
 
 - Resolve stock callouts through the speaker's hero and skin voice set and send them to the speaker and teammates. Play Need Healing on both the untargeted marker path and the aimed text-only fallback while preserving authored directed cues.
