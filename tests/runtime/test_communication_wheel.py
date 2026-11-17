@@ -5,6 +5,7 @@ import os
 import struct
 import unittest
 from dataclasses import replace
+from itertools import product
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -939,10 +940,11 @@ class CommunicationWheelTests(unittest.TestCase):
                 client.apply(update)
                 body.stream.arrived(update.chunk_last)
 
-        for emote in inputs["emotes"]:
-            with self.subTest(emote=emote["name"]):
+        for mode, emote in product(inputs["modes"], inputs["emotes"]):
+            with self.subTest(mode=mode["name"], emote=emote["name"]):
                 body = BodyScript(
                     hero, 0xA0000101, inputs["start_frame"], communication_wheel=True,
+                    mode=int(mode["guid"], 16),
                     emote_aliases=(int(emote["alias"], 16),),
                     emote_blend_trees=(int(emote["blend_tree"], 16),),
                 )
@@ -952,6 +954,7 @@ class CommunicationWheelTests(unittest.TestCase):
                 client = decode.ClientBody.for_hero(hero)
 
                 replicate(body, client)
+                post_emote_checkpoints = (emote["finished_at"], manual_switch - 1, manual_switch)
                 for offset in range(1, manual_switch + 1):
                     if offset == inputs["wheel_selection_frame_offset"]:
                         runtime.send_message(
@@ -960,10 +963,11 @@ class CommunicationWheelTests(unittest.TestCase):
                         )
                     body.command(
                         body.frame + 1, FIRE if offset == emote.get("cancel_frame_offset") else 0,
-                        action=2 if offset == manual_switch else 0, grounded=True,
+                        action=inputs["switch_weapon_action"] if offset == manual_switch else 0,
+                        grounded=True,
                     )
                     phase = emote["active_at"].get(str(offset))
-                    if phase is None and offset not in (emote["finished_at"], manual_switch):
+                    if phase is None and offset not in post_emote_checkpoints:
                         continue
                     replicate(body, client)
                     instances = {i.graph.index: i for i in body.component.instances.values()}

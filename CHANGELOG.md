@@ -12,7 +12,32 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Left `check_body_field_contract.py` and `check_spatial_owner_absence_contract.py` out of this batch because they depend on unmerged Draft #32 methods (`STU_00707E1E` / `declare_spatial_binding_owner_absent`).
 - Passed Ruff, 974 public Python tests (`skipped=3` on Linux: `test_npc_hotkeys.test_stop_key_is_captured_while_lobby_dispatch_is_busy` plus 2 Rust-only adapter boundary subtests in `test_flashbang_entry_guard_contract`), and `python -S` contract checks against both local and `rust` fixture directories.
 
+#### Custom-game emote weapons
+
+- Keep Mercy’s staff equipped during and after emotes in solo Hybrid. The 104319 pistol graph can set the combat default in that mode. Emotes check available slots from the first slot, and the weapon manager carries the equipped slot into normal play. The requested combat default still applies for startup or when no valid weapon is equipped.
+- Checked the local Match Protocol for equipped emotes and package loading. The weapon branch was traced in the extracted 104319 graphs. The owner-frame regression covers Relax (including its stand-up animation), Flurry and Caduceus in Practice Range and solo Hybrid, followed by a manual switch to the pistol. Original-client visual acceptance of the custom-game fix is pending.
+- Passed Ruff, 956 public Python tests, six JavaScript tests, 125 focused runtime tests and the runtime preflight.
+
 ### 2026-11-16
+
+#### A failing match command answers one line, not a traceback
+
+- A raising match command used to escape the handler, and the connection's traceback reply
+  arrived unsplittable: a chat frame longer than the channel's slice carries no control bytes,
+  the lobby channel dies from that point on, and every later command looks like it did nothing
+  (learned live from a `.body` probe). The dispatch now answers one log line on failure, and
+  every private reply is capped at 200 characters at the single `_private_reply` funnel.
+
+#### Training Bot death frames survive the reliable-record loss
+
+- A bot's death pulse now goes out as a full body frame until its feed instance reaches the
+  acknowledged base. The memory sampler in the kill-feed note shows a delta is dropped whenever
+  its datagram carries any reliable record, the datagram is acknowledged, and the pump then
+  refuses every later delta for that body; e3c05af keeps the first death chunk out of a
+  messages datagram, but each re-kill draws that lottery again. A full frame has first frame 0
+  and always passes the pump — the only form that drew the line at every kill in those runs.
+  Seen on the original client (Aksuma's stand, 2026-11-16): kills of spawner-made-again bodies
+  drew no line before and draw one after, ring and nameplate intact.
 
 #### Communication and equipped voice wheels
 
