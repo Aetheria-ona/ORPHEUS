@@ -135,7 +135,8 @@ FIELDS = {
         "component frame server_only latest_live _initial_frame death_frame _produced behavior"
     ),
     BotWorld: _names(
-        "hero mode weapon_buttons owner_position controller_components match manual_target manual_nameplate"
+        "hero mode weapon_buttons owner_position controller_components match "
+        "manual_target manual_nameplate patrol_sample patrol_stop_frame"
     ),
     runtime.World: _names("hero mode"),
     LinkCipher: _names("key_in key_out salt_in salt_out"),

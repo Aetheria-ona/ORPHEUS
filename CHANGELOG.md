@@ -6,6 +6,8 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
+- Stop floor-following Practice Range bot patrols for the next tick when a live victim PlayScript requests a channel-0 velocity reset (`STU_FF3471E9` magnitude 0), ignoring stale, replaced, or dead recipients, and add the synthetic [patrol-victim-velocity-v1](fixtures/behavior/patrol-victim-velocity-v1.json) contract (#37). Upward launch impulse and original-client verification remain open.
+
 - Preserve optional StateScript names and event metadata when preparing a local runtime pack. ORPHEUS-generated JSON tables and manifests now use LF on Windows and Linux. Generated graph bundles omit the host OS, filename and timestamp from their identifying metadata.
 - Add a loopback Practice Range benchmark for 1, 2, 4 or 8 simulated players. Record per-tick CPU and wall times, skipped simulation frames and which offered inputs the server actually accepted. The [worker performance report](docs/PERFORMANCE.md) records six eight-second windows on Windows, including independent one- and two-player repeats.
 
