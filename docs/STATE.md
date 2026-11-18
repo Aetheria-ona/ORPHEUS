@@ -30,10 +30,10 @@ These observations come from earlier playtests. Acceptance of the current Python
   - Loopback UDP lifecycle suites cover 10x Soldier/Reaper swaps, 10x leave/rejoins, packet loss, and ACK retries.
 - **Public checks.** Windows and Ubuntu CI run Ruff, Python discovery without runtime data, the launcher injection suite, and the dashboard and console Node tests. At `3eefae6b`, Windows discovery ran 977 tests, including 2 skips.
 - **Cross-language contract coverage.** [#61](https://github.com/leafall903/ORPHEUS/issues/61) closed after [#79](https://github.com/leafall903/ORPHEUS/issues/79) added Rust consumers for four movement and action fixtures and [#80](https://github.com/leafall903/ORPHEUS/issues/80) added Python StateScript consumers. See [the contract guide](BEHAVIOR_CONTRACTS.md) for the tests.
+- **Recycled player body IDs.** In the prepared [combat-notice suite](../tests/runtime/test_game_bot_notices.py), a lost hit retries against the previous body. The allocator skips that ID while a peer still has a reliable notice outstanding. A retried destroy must be acknowledged and the reuse delay must expire before the ID becomes available. Exhausting all 255 IDs preserves the current body. On 2026-11-18 the existing 42 tests passed on Linux ARM64 at `3eefae6b` and Windows at `45044d0d`. The full-switch regression also exercises a lost hit across 255 switch attempts. See [#12](https://github.com/leafall903/ORPHEUS/issues/12) for the runtime fingerprint and reproduction command.
 
 ---
 
 ## Remaining Architecture / Transport Gaps
 
-- **Server-owned bug ([#12](https://github.com/leafall903/ORPHEUS/issues/12)):** Reliable combat notices already in the resend queue can still target a numeric body ID recycled after 255 hero switches before the notice is ACKed.
 - **Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32):** Full 32-hero Python integration candidate (`codex/python-hero-upstream-20261113`) needs conflict reconciliation and CI cleanup before any merge to `main`.
