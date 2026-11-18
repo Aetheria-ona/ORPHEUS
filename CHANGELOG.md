@@ -6,6 +6,8 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
+- Mirror the synthetic [owner-first-command-anchor-v1](fixtures/behavior/owner-first-command-anchor-v1.json) contract in `tests/public/test_behavior_contracts.py` against `CommandQueue.before_limit`, keeping Python and Rust first-command admission aligned across fresh body scripts and existing input history.
+
 - Stop floor-following Practice Range bot patrols for the next tick when a live victim PlayScript requests a channel-0 velocity reset (`STU_FF3471E9` magnitude 0), ignoring stale, replaced, or dead recipients, and add the synthetic [patrol-victim-velocity-v1](fixtures/behavior/patrol-victim-velocity-v1.json) contract (#37). Upward launch impulse and original-client verification remain open.
 
 - Preserve optional StateScript names and event metadata when preparing a local runtime pack. ORPHEUS-generated JSON tables and manifests now use LF on Windows and Linux. Generated graph bundles omit the host OS, filename and timestamp from their identifying metadata.
