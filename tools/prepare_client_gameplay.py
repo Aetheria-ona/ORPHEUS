@@ -77,7 +77,10 @@ def prepare_gameplay(
     if "game_graphs_174.json.gz" in names:
         assert owlib is not None
         enums = extract_game_graphs.EnumTables(owlib / "TankLib" / "STU" / "Types")
-        graphs = extract_game_graphs.collect(xml, enums, hero_table=heroes)
+        graphs = extract_game_graphs.collect(
+            xml, enums, hero_table=heroes, ai_spawners=spawners if spawners.is_file() else None,
+            selected_maps=maps,
+        )
         if not graphs["graphs"] or not graphs["bodies"]:
             raise ValueError("DataTool XML did not produce a gameplay graph bundle")
         if graphs["missing"]:
