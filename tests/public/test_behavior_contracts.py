@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from ow174.game import correction, movelog, mover, statescript
-from ow174.game.commands import Command
+from ow174.game.commands import Command, CommandQueue
+from ow174.game.projectiles import MAX_LEASE_FRAME
 from ow174.game.script import decode, nodes, runtime
 from ow174.game.script.driver import BodyStream, Snapshot, WheelCallout, frame_callout
 from ow174.game.script.expr import Entity, Vec3
@@ -374,6 +375,25 @@ class ServerOnlyMovementContractTests(unittest.TestCase):
         for frame, window in expected["windows"]:
             self.assertEqual(windows[frame], window, frame)
         self.assertEqual(sent, list(range(expected["sent_frames"][0], expected["sent_frames"][1] + 1)))
+
+
+class FirstCommandAnchorContractTests(unittest.TestCase):
+    def test_first_command_anchor_respects_body_and_existing_input_history(self):
+        contract = json.loads(
+            (FIXTURES / "owner-first-command-anchor-v1.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(contract["schema_version"], 1)
+        self.assertEqual(contract["case_id"], "owner.first-command-anchor.v1")
+        self.assertEqual(contract["evidence"], "synthetic-reference")
+        for case in contract["cases"]:
+            with self.subTest(case=case["name"]):
+                queue = CommandQueue()
+                if case["prior"] is not None:
+                    queue.reset(last_frame=case["prior"])
+                offered = [Command(frame) for frame in case["offered"]]
+                fresh, boundary = queue.before_limit(offered, MAX_LEASE_FRAME, anchor=case["body_frame"])
+                self.assertIsNone(boundary)
+                self.assertEqual([command.frame for command in fresh], case["fresh"])
 
 
 if __name__ == "__main__":
