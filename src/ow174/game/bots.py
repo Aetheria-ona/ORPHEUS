@@ -181,12 +181,20 @@ class Bot:
         self.moved_tick: int | None = None  # the last tick it moved or turned in
         self.last_tick: int | None = None
 
-    def step(self, tick: int, seconds: float, collision=None, *, paused_until: int = 0) -> None:
+    def step(
+        self,
+        tick: int,
+        seconds: float,
+        collision=None,
+        *,
+        paused_until: int = 0,
+        stop_frame: int | None = None,
+    ) -> None:
         """Walk the route up to `tick`, a tick being `seconds` long, on the map's collision if loaded."""
         if self.dead:
             return
         if not self.route:
-            if tick < paused_until:
+            if tick < paused_until or tick == stop_frame:
                 self._pause(tick)
                 self.last_tick = tick
             return
@@ -195,7 +203,7 @@ class Bot:
             return
         self.last_tick = tick
         for at in range(tick - min(ticks, CATCH_UP) + 1, tick + 1):
-            if at < paused_until:
+            if at < paused_until or at == stop_frame:
                 self._pause(at)
             else:
                 self._tick(at, seconds, collision)

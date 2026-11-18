@@ -24,6 +24,14 @@ class Pending:
     instance_id: int = 0
 
 
+def submit_loaded(component: runtime.Component, request: play.Request) -> bool:
+    definition = graph.graph(request.resource.guid & 0xFFFFFFFFFFFF)
+    if definition is None:
+        return False
+    Queue(component, lambda _: Load("ready", definition)).submit(request)
+    return True
+
+
 class Queue:
     def __init__(self, component: runtime.Component, acquire):
         if not isinstance(component, runtime.Component) or not callable(acquire):

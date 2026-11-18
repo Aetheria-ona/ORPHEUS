@@ -645,15 +645,12 @@ class BodyWorld(runtime.World):
         elif request.targets == (self.body,):
             self.submit_body_play(instance.component, request)
 
+
     @staticmethod
     def submit_body_play(component: runtime.Component, request: "play.Request") -> bool:
-        from ow174.game.script import play_queue
+        from ow174.game.script.play_queue import submit_loaded
 
-        definition = graph.graph(request.resource.guid & 0xFFFFFFFFFFFF)
-        if definition is None:
-            return False
-        play_queue.Queue(component, lambda _: play_queue.Load("ready", definition)).submit(request)
-        return True
+        return submit_loaded(component, request)
 
     def retires_stopped_play(self, instance: runtime.Instance) -> bool:
         index = instance.graph.index

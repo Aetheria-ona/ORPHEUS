@@ -413,7 +413,7 @@ class _Export:
                                "spray_unlocks", "voice_effects"))
             if kind is BotWorld:
                 fields.update(("weapon_buttons", "owner_position", "controller_components", "match",
-                               "manual_target", "manual_nameplate"))
+                               "manual_target", "manual_nameplate", "patrol_sample", "patrol_stop_frame"))
             # The match and its pending deliveries belong to the enclosing server snapshot.
             return {"class": _name(kind), "fields_identity": self.identity(vars(obj)),
                     "fields": self.fields(obj, fields, exclude={"match"})}
