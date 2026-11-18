@@ -22,7 +22,12 @@ def load_tool(name: str):
 ssq = load_tool("ssq")
 
 
-INDEX = ssq.load_index()
+INDEX: dict
+
+
+def setUpModule():
+    global INDEX
+    INDEX = ssq.load_index()
 
 
 def run(*argv: str) -> list[str]:
