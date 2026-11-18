@@ -1,7 +1,8 @@
 """The messages the lobby builds must match the snapshot taken before the package was restructured.
 
 The client closes the connection on a malformed or unexpected message, so a refactor must not change
-a single byte. The snapshot stores a hash per message for a few fixed profiles.
+a single byte unintentionally. The snapshot checks every original message field for fixed profiles.
+The gallery NPC rows added later are checked separately on the same emitted catalog.
 
 Regenerate only after an intended change:  py -3 tests/runtime/test_content_golden.py --update
 """
@@ -22,6 +23,7 @@ from ow174.catalog.items import ItemDB  # noqa: E402
 from ow174.catalog.templates import RetailTemplates  # noqa: E402
 from ow174.content import Content, Identity  # noqa: E402
 from ow174.jam.codec import Schemas  # noqa: E402
+from ow174.jam.groups import HERO_CATALOG  # noqa: E402
 
 NOW = 1_800_000_000.0
 IDENT = Identity(account_lo=0x1C2A69FB, session=(7, 1), party_id=(11, 12), party_entity=(13, 14))
@@ -68,11 +70,33 @@ def summarize(messages):
     return [[f"{crc:08X}", msg_id, digest(value)] for crc, msg_id, value in messages]
 
 
+def summarize_lobby(messages, collection):
+    """Check the gallery extension on real login/live messages before hashing the original rows."""
+    npc_ids = sorted(collection.items.npc_heroes.difference(collection.heroes))
+    npc_heroes = [
+        {"+0x0": [], "+0x18": [], "+0x30": hero, "+0x38": 0, "+0x40": 0,
+         "+0x48": 0, "+0x50": 0, "+0x58": [], "+0x70": [], "+0x88": []}
+        for hero in npc_ids
+    ]
+    npc_stores = [{"+0x0": [], "+0x18": hero} for hero in npc_ids]
+    original = []
+    for group, message, value in messages:
+        if (group, message) == (HERO_CATALOG, 24900):
+            value = value.copy()
+            for key, expected in (("+0x80", npc_heroes), ("+0x98", npc_stores)):
+                count = len(collection.hero_template[key])
+                if value[key][count:] != expected:
+                    raise AssertionError(f"Gallery NPC records in catalog {key} changed")
+                value[key] = value[key][:count]
+        original.append((group, message, value))
+    return summarize(original)
+
+
 def build_all(content: Content, profile: Profile) -> dict:
     c = content
     return {
-        "login": summarize(c.login_messages(profile, IDENT)),
-        "live": summarize(c.live_messages(profile, IDENT)),
+        "login": summarize_lobby(c.login_messages(profile, IDENT), c.collection),
+        "live": summarize_lobby(c.live_messages(profile, IDENT), c.collection),
         "menu_config": summarize(
             [(0, 0, c.retail.menu_config(profile, IDENT, c.menu_hero.menu_guid(profile)))]
         ),

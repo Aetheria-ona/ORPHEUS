@@ -191,12 +191,17 @@ def spawn_candidate_probes(world, request, data):
         return
     start = x, floor.y, z
     dx, _, dz = request.direction
-    heading = math.atan2(dz, dx)
+    horizontal = math.hypot(dx, dz)
+    forward_x, forward_z = (dx / horizontal, dz / horizontal) if horizontal else (1.0, 0.0)
     golden_turn = (math.sqrt(5) - 1) / 2
     for index in range(request.max_candidates):
         radius = request.radius * math.sqrt((index + 0.5) / request.max_candidates)
-        angle = heading + request.half_angle * (2 * (index * golden_turn % 1) - 1)
-        point = edge(world, start, x + radius * math.cos(angle), z + radius * math.sin(angle), data)
+        angle = request.half_angle * (2 * (index * golden_turn % 1) - 1)
+        along, across = radius * math.cos(angle), radius * math.sin(angle)
+        # Rotate in the requested horizontal frame. A zero-width sector stays on its axis.
+        target_x = x + (forward_x * along - forward_z * across)
+        target_z = z + (forward_z * along + forward_x * across)
+        point = edge(world, start, target_x, target_z, data)
         yield expr.Vec3(*point) if point is not None else None
 
 

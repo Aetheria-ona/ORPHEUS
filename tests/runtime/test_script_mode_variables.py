@@ -59,8 +59,12 @@ class ModeVariableTests(unittest.TestCase):
                 if hero != SOLDIER:
                     run.match.switch_hero(player, heroes()[hero])
                 component = player.body_script.component
-                # Isolate the objective branch from 004B's separate native startup filter.
-                instance = component.create(graph.graph(0x0BA4))
+                # The body startup graph already attaches the objective listener.
+                objectives = [inst for inst in component.instances.values()
+                              if inst.graph.index == 0x0BA4 and inst.parent is not None
+                              and inst.parent.graph.index == 0x004B]
+                self.assertEqual(len(objectives), 1)
+                instance = objectives[0]
                 component.set(7059, True)
                 count = instance.find_var(runtime.INSTANCE_SCOPE, 17679)
                 got = []

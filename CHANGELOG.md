@@ -6,9 +6,16 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
+- Rotate spawn probes in the request's horizontal frame. Zero-width sectors stay on their axis, and the closed cone, floor and wall checks have a synthetic cross-platform fixture. Retail NPC spawn placement remains unverified.
+- When generating gameplay graphs from local XML, include the selected maps' spawner body definitions, AI associations and placed script roots. On a local 104319 Practice Range pack this gave all 15 training bots their body scripts and delivered their nameplate presenters on first spawn and respawn. Visible overhead health bars still require original-client verification.
+
 - Add a prepared-runtime test runner with private logs, manifest fingerprints, platform-specific failure baselines and a limit on skipped tests.
 - Restore nine entity lifecycle tests that stopped before their assertions when the test match lacked the optional scene host. The prepared suite now checks create acknowledgements, retries and entity ID reuse with an ordinary match's initial scene-host state.
 - StateScript queries and the remix event catalog test now read metadata from the selected runtime pack. The StateScript query cache distinguishes packs, and test discovery can list query tests before loading their index.
+- Check the gallery NPC additions in the login and live hero catalogs while preserving the historical message digests and ordering for all five lobby profiles.
+- Restore prepared Deadeye aim and cleanup checks by verifying the registered effect instance. Exercise objective messages on the listener attached by body startup. The checks detect an effect left alive after target exit and duplicate objective delivery.
+- Verify both Sprint movement modifiers and their operands across runtime packs that serialize the same object fields in different orders.
+- Verify Doomfist's recorded jump and Slam commands on a ledge and above continuous ground. Replay checks the movement sample and the ability phase selected by each terrain.
 - Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
 - Add a tag-specific verification form and a revision-pinned Soldier parity matrix. Record the kill-feed and combat HUD observations separately in the Python status notes.
 

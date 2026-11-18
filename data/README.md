@@ -89,11 +89,11 @@ For unindexed client-made map props, export root model CASC records via `tools/e
 
 ### Custom Entity & Mode Bundles (`--entity`, `--mode-xml`)
 
-To export non-hero entities (such as the six Practice Range bot bodies `1403 143E 146E 14A9 14D2 14ED`) or map/mode scripts, write the bundle **outside the repository** and pass it via `--game-graphs`:
+When step 2 generates a graph bundle from XML, the packer reads the selected maps' spawner table and includes the bodies and scripts used by their NPCs. An existing source bundle is copied as supplied. To refresh it, generate a replacement outside the repository and pass it to the packer with `--game-graphs`. The following example includes NPCs from a prepared spawner table and mode scripts. Use `--entity <index>` for additional entities absent from those spawns.
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 tools\extract_game_graphs.py --xml 'C:\path\to\xml' --owlib 'C:\path\to\owlib' `
-    --entity 1403 --entity 143E --entity 146E --entity 14A9 --entity 14D2 --entity 14ED `
+    --ai-spawners 'C:\path\to\runtime\data\ai_spawners_174.json' `
     --mode-xml 'C:\path\to\xml\0C5' --output 'C:\path\to\entity-graphs.json.gz'
 
 .\.venv\Scripts\python.exe tools\prepare_server_runtime.py --source 'C:\path\to\source' --destination 'C:\path\to\runtime' `

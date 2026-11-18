@@ -11,8 +11,8 @@ graph reference (a GUID of type 01B anywhere in a kept graph).
 Additional entity definitions can be added to a separate bundle with repeated --entity options.
 Use --mode-xml <0C5 directory> with --output outside the repository to also export the mode entity's
 initial variables and include its mode, controller and body script roots.
-Use --ai-spawners <ai_spawners_174.json> with an external --output to include the graphs placed on maps
-and the AI weapon buttons on additional entity definitions.
+Use --ai-spawners <ai_spawners_174.json> with an external --output to include the maps' placed graphs,
+their referenced NPC bodies and associated AI controls. Tables without hero metadata still supply graph roots.
 
 Per graph it keeps what a runtime needs and drops the editor layout (positions, comments, display names,
 colours). The file format is described in ow174/game/script/graph.py, which reads it.
@@ -666,14 +666,26 @@ def mode_variables(folder: Path, enums: EnumTables) -> dict[str, dict[str, bool 
 
 
 def ai_graph_roots(path: Path) -> set[int]:
-    """Collect .01B roots from the existing map spawner table, including mode-gated placements."""
+    """Return the placed graph roots, including mode-gated placements."""
+    return ai_spawner_roots(path)[0]
+
+
+def ai_spawner_roots(path: Path, selected_maps: set[int] | None = None) -> tuple[set[int], set[int]]:
+    """Read each selected placement's .01B roots and its hero's .003 body definition."""
     table = json.loads(path.read_text(encoding="utf-8"))
     maps = table.get("maps") if isinstance(table, dict) else None
     if not isinstance(maps, dict):
         raise ValueError(f"{path.name}: expected a map table")
+    heroes = table.get("heroes", {})
+    if not isinstance(heroes, dict):
+        raise ValueError(f"{path.name}: expected a spawner hero table")
+    selected = None if selected_maps is None else {f"0x{guid:016x}" for guid in selected_maps}
     graph_type = full_guid("0.01B") >> 48
     roots = set()
+    bodies = set()
     for map_id, record in maps.items():
+        if selected is not None and map_id.lower() not in selected:
+            continue
         spawners = record.get("spawners") if isinstance(record, dict) else None
         if not isinstance(spawners, list):
             raise ValueError(f"{path.name}: map {map_id} must contain a spawner list")
@@ -682,6 +694,15 @@ def ai_graph_roots(path: Path) -> set[int]:
             references = spawner.get("graphs") if isinstance(spawner, dict) else None
             if not isinstance(references, list):
                 raise ValueError(f"{context} must contain a graph list")
+            hero = heroes.get(spawner.get("hero"))
+            if hero is not None:
+                body = hero.get("body") if isinstance(hero, dict) else None
+                if not isinstance(body, str) or not re.fullmatch(r"0x0400[0-9a-fA-F]{12}", body):
+                    raise ValueError(f"{context} must reference a .003 body through its hero")
+                body_index = int(body, 16) & 0xFFFFFFFFFFFF
+                if body_index == 0:
+                    raise ValueError(f"{context} has a zero body index")
+                bodies.add(body_index)
             for reference in references:
                 if not isinstance(reference, str) or not re.fullmatch(r"0x[0-9a-fA-F]{16}", reference):
                     raise ValueError(f"{context} has an invalid graph GUID")
@@ -690,7 +711,7 @@ def ai_graph_roots(path: Path) -> set[int]:
                 if guid >> 48 != graph_type or not 0 < graph <= 0xFFFF:
                     raise ValueError(f"{context} must reference a .01B graph with a nonzero 16-bit index")
                 roots.add(graph)
-    return roots
+    return roots, bodies
 
 
 def mode_graph_roots(folder: Path) -> set[int]:
@@ -793,11 +814,13 @@ def map_script_instances(path: Path, enums: EnumTables) -> tuple[list[dict], set
 def collect(
     xml_dir: Path, enums: EnumTables, entity_indexes: tuple[int, ...] = (), mode_xml: Path | None = None,
     *, ai_spawners: Path | None = None, hero_table: Path | None = None,
-    map_entities: dict[int, Path] | None = None,
+    map_entities: dict[int, Path] | None = None, selected_maps: set[int] | None = None,
 ) -> dict:
     variables = mode_variables(mode_xml, enums) if mode_xml is not None else None
     mode_roots = mode_graph_roots(mode_xml) if mode_xml is not None else set()
-    ai_roots = ai_graph_roots(ai_spawners) if ai_spawners is not None else set()
+    ai_roots, ai_bodies = (
+        ai_spawner_roots(ai_spawners, selected_maps) if ai_spawners is not None else (set(), set())
+    )
     map_scripts, map_roots = {}, set()
     for map_index, path in sorted((map_entities or {}).items()):
         records, used = map_script_instances(path, enums)
@@ -813,8 +836,10 @@ def collect(
         for graph in sorted(used):
             queue.append((graph, entry["name"]))
     entities = {}
-    for index in sorted(set(entity_indexes)):
+    for index in sorted(set(entity_indexes) | ai_bodies):
         path = xml_dir / "003" / f"{index:012X}.003.xml"
+        if index in ai_bodies and not path.is_file():
+            raise ValueError(f"Missing map spawner body XML: {path.name}")
         name = f"entity {index:04X}"
         record, used = body_record(path, enums, None, name, include_ai_weapons=ai_spawners is not None)
         entities[f"0x{0x0400000000000000 | index:016X}"] = record
