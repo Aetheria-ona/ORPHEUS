@@ -4,11 +4,10 @@
 
 ORPHEUS is an open-source server reimplementation for **Overwatch 1 (retail build 1.74.0.0.104319)** focused on research and preservation.
 
-- **`main` (this branch):** the Python reference server, Windows launcher scripts, data extraction tools, and synthetic/runtime test suites.
-- **`leafall`:** hero-ability development branch synced with `main`.
-- **`rust`:** the native Rust dedicated server (experimental, shares cross-language behavior contracts with `main`).
+- **`main` (this branch)** contains the Python reference server. Start here for Practice Range playtests, the Windows launcher, runtime preparation and Python tests. The first playable milestone is still in development.
+- **`rust`** contains the experimental native dedicated server. Gameplay verified on the original client with Python is the reference for migration to Rust.
 
-[Quick Start (Local Practice Range)](#local-practice-range) · [Join a Server](#join-a-server) · [Current Status](#current-status) · [Contributing](CONTRIBUTING.md) · [Open Issues](https://github.com/leafall903/ORPHEUS/issues)
+[Quick Start (Local Practice Range)](#local-practice-range-single-player-testing) · [Join a Server](#join-a-server) · [Current Status](#current-status) · [Contributing](CONTRIBUTING.md) · [Open Issues](https://github.com/leafall903/ORPHEUS/issues)
 
 ---
 
@@ -98,11 +97,13 @@ See [data/README.md](data/README.md) for the full file checklist, DataTool catal
 
 ## Current Status
 
-| Area | Server Implementation | Original-Client Status & Open Gaps |
+The client column lists observations from earlier 104319 playtests. Verification of the current Python milestone is pending.
+
+| Area | Server Implementation | Original-Client Observations & Open Gaps |
 | --- | --- | --- |
 | **Login, Profiles & Gallery** | Local Battle.net/lobby emulation, account profiles, persisted keybinds/settings (`22200`–`22204`), cosmetic loadouts, Hero Gallery previews. | Login, hero select, skin switching, and saved settings load cleanly in client 104319. Broader social/competitive rules remain WIP. |
-| **Soldier: 76 & Bots** | Full body/weapon VM, rifle firing & reload, Sprint, Helix Rockets, Biotic Field, Practice Range bot patrol, hit detection, and respawn. | Training bots can be damaged and killed; full 60s client acceptance, overhead bot health bars, bot names in kill feed (#8), and headshot audio (#9) remain open. |
-| **Doomfist & Wrecking Ball** | Shared StateScript updates synced from `leafall`: Seismic Slam (wave, placement, landing effects), Rocket Punch dash/view/charge walk, Uppercut reactions/shields, Grappling Claw, Quad Cannons, Piledriver, Adaptive Shield, Minefield. | Rocket Punch movement & charge walk verified in client; Doomfist target damage (#5, #36, #37), Meteor Strike early landing (#38), Slam retest (#6), and gauntlet view anchor (#47) remain open. |
+| **Soldier: 76 & Bots** | Body and weapon StateScript VM, rifle firing & reload, Sprint, Helix Rockets, Biotic Field, Practice Range bot patrol, hit detection, and respawn. | Testers damaged and killed training bots. The ten-minute Soldier playtest for v0.1, overhead bot health bars (#7), bot names in the kill feed (#8), and headshot audio (#9) remain open. |
+| **Doomfist & Wrecking Ball** | Shared StateScript support for Seismic Slam (wave, placement, landing effects), Rocket Punch dash/view/charge walk, Uppercut reactions/shields, Grappling Claw, Quad Cannons, Piledriver, Adaptive Shield, Minefield. | Rocket Punch movement & charge walk verified in client; Doomfist target damage (#5, #36, #37), Meteor Strike early landing (#38), Slam retest (#6), and gauntlet view anchor (#47) remain open. |
 | **Communication Wheel & Voice** | Equipped emotes, 3rd-person camera & angle locks, Mercy staff/weapon selection, equipped voice lines & sprays. | Camera framing and Mercy Relax/Flurry weapon models confirmed in Practice Range. |
 | **PvE Entrances** | All 47 Archives and Junkenstein mode cards, Tutorial, and Practice Range loading. | All 47 cards enter and return to menus cleanly on client 104319. Live mission AI and objectives remain open. |
 

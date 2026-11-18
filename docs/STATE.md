@@ -6,7 +6,9 @@ This summarizes what is verified on the Python server (`main`) against **Overwat
 
 ## Live Original-Client Observations (1.74.0.0.104319)
 
-| Area | What Works in Live Client | Open / Failing in Live Client |
+These observations come from earlier playtests. Acceptance of the current Python milestone requires fresh results on its verification tag.
+
+| Area | Observed in Earlier Playtests | Open for Retest |
 | --- | --- | --- |
 | **Launcher & Login** | `_retail_\Overwatch.exe` logs in through the local Battle.net/TLS relay without official Battle.net, loads Practice Range (`0688`), switches heroes, and loads/saves settings (`+0x130`). | Broader multi-player internet latency and full competitive flow unverified. |
 | **PvE & Tutorial Entrances** | All 47 Archives/Junkenstein queue cards (Uprising, Retribution, Storm Rising, Junkenstein, Challenges), Tutorial, and Practice Range enter hero select/world and return cleanly to menus (verified on 104319). | Live mission objectives, enemy AI, and challenge modifiers remain open. |
@@ -26,7 +28,8 @@ This summarizes what is verified on the Python server (`main`) against **Overwat
   - `CONTROLLED_SERVER_JOURNAL_V2` ([CONTROLLED_SERVER_JOURNAL_V2.txt](CONTROLLED_SERVER_JOURNAL_V2.txt)) & `SERVER_STORED_STATE_V1` ([SERVER_STORED_STATE_V1.txt](SERVER_STORED_STATE_V1.txt)): replay encrypted ingress through `GameServer` and hash VM, mover, GJK, combat, and transport state across ticks.
   - `NATIVE_BODY_REPLAY_V2` ([NATIVE_BODY_REPLAY_V2.txt](NATIVE_BODY_REPLAY_V2.txt)): records all 11 command fields, state allocation order, and `movelog` windows.
   - Loopback UDP lifecycle suites cover 10x Soldier/Reaper swaps, 10x leave/rejoins, packet loss, and ACK retries.
-- **Public & cross-platform CI (`tests/public/`):** Runs on both Windows (`source-tests`) and Ubuntu Linux (`source-tests-linux`) with `ORPHEUS_RUNTIME_DIR=""`, covering Ruff lint, 954 synthetic Python unit tests, dashboard/console Node tests, and `tests/runtime/test_launcher_inject.py`.
+- **Public checks.** Windows and Ubuntu CI run Ruff, Python discovery without runtime data, the launcher injection suite, and the dashboard and console Node tests. At `3eefae6b`, Windows discovery ran 977 tests, including 2 skips.
+- **Cross-language contract coverage.** [#61](https://github.com/leafall903/ORPHEUS/issues/61) closed after [#79](https://github.com/leafall903/ORPHEUS/issues/79) added Rust consumers for four movement and action fixtures and [#80](https://github.com/leafall903/ORPHEUS/issues/80) added Python StateScript consumers. See [the contract guide](BEHAVIOR_CONTRACTS.md) for the tests.
 
 ---
 
@@ -34,4 +37,3 @@ This summarizes what is verified on the Python server (`main`) against **Overwat
 
 - **Server-owned bug ([#12](https://github.com/leafall903/ORPHEUS/issues/12)):** Reliable combat notices already in the resend queue can still target a numeric body ID recycled after 255 hero switches before the notice is ACKed.
 - **Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32):** Full 32-hero Python integration candidate (`codex/python-hero-upstream-20261113`) needs conflict reconciliation and CI cleanup before any merge to `main`.
-- **Cross-language test parity ([#61](https://github.com/leafall903/ORPHEUS/issues/61)):** 19 StateScript behavior contracts currently living on `rust` remain to be ported back into `main`'s `tests/public/`.
