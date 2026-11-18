@@ -1,6 +1,6 @@
 # Python and Rust gameplay parity for build 104319
 
-Use this matrix to choose the next Soldier: 76 verification session. The Python reference is [`45044d0d`](https://github.com/leafall903/ORPHEUS/tree/45044d0d62399d9eb876c08e788aaea1f56cecc9). The Rust implementation is [`b4f3f849`](https://github.com/leafall903/ORPHEUS/tree/b4f3f849bdad2d2d488178594335d88a9f202bf5). These revisions identify the implementations across the November 19 branch rename.
+Use this matrix to choose the next Soldier: 76 verification session. It records evidence for Python `main` at [`45044d0d`](https://github.com/leafall903/ORPHEUS/tree/45044d0d62399d9eb876c08e788aaea1f56cecc9) and Rust `rust` at [`b4f3f849`](https://github.com/leafall903/ORPHEUS/tree/b4f3f849bdad2d2d488178594335d88a9f202bf5). Both branches continue to accept normal pull requests.
 
 ⬜ means a port is outstanding. 🟨 means partial implementation or insufficient evidence for the full row. 🟩 means a named synthetic contract passed for the indicated behavior. 🟦 requires a matching private replay on the same platform. ⭐ requires original-client acceptance on an identified revision. The goldens column tracks the private **cross-language** comparison. A dash means there is no verified comparison recorded here. Keep the contract result when recording stronger evidence.
 
@@ -33,4 +33,4 @@ Use this matrix to choose the next Soldier: 76 verification session. The Python 
 
 **How to check a row.** For the green rows, run the public Python tests in [the contract guide](BEHAVIOR_CONTRACTS.md) and the Rust workspace tests at the pinned revision. Both trees contained identical fixture bytes for those rows on November 18. The [Python status page](STATE.md) and [Rust prepared-test notes](https://github.com/leafall903/ORPHEUS/blob/b4f3f849bdad2d2d488178594335d88a9f202bf5/docs/STATE.md) describe the narrower headless and historical observations behind the yellow rows.
 
-Record runtime manifest fingerprint, build, revision, scenario and platform for a private golden; publish only a result summary. Record tester, locale, actions, expected behavior and observed result for a client pass. A verification-day report should cover all eight playable scenarios on one tag with two testers. After Python maintenance ends, its archived revision remains the reference for new Rust comparisons.
+Record the runtime manifest fingerprint, build, revision, scenario and platform for a private golden. Publish only a result summary. Record tester, locale, actions, expected behavior and observed result for a client pass. A verification-day report should cover all eight playable scenarios on one tag with two testers. For each new comparison, identify the exact Python and Rust revisions tested.

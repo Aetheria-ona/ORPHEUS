@@ -7,6 +7,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 ### 2026-11-18
 
 - Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
+- Add a tag-specific verification form and a revision-pinned Soldier parity matrix. Record the kill-feed and combat HUD observations separately in the Python status notes.
 
 - Clarify which branch to use for Python playtests and Rust migration. The status and contract guides now link the completed cross-language coverage work and distinguish earlier client observations from the next playtest.
 
