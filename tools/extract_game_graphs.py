@@ -56,6 +56,7 @@ ROOT_GRAPHS = {
     0x20E4: "weapon and ability HUD",
     0x13C0: "Practice Range mode",
     0x0F4A: "PvP mode",
+    0x1225: "Escort payload",
     0x0EC2: "PvP mode",
     0x0C8E: "PvP mode body",
     0x0258: "Biotic Field (the initial graph of 03DC.003, which 0257's canister leaves where it lands)",

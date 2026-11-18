@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "case_id": "escort-round",
+  "target_build": 104319,
+  "source": "Synthetic rail exercised through the server-owned Escort round",
+  "evidence": "synthetic-reference",
+  "client_acceptance": "pending",
+  "input": {
+    "placement": 20,
+    "checkpoints": [30, 31, 32],
+    "stage_seconds": [60, 20, 10],
+    "assembly_ends": 30,
+    "steps": [
+      {"now": 74, "players": [[1, [0, 0, 0]]]},
+      {"now": 75, "players": []},
+      {"now": 80, "players": [[1, [0, 0, 0]], [0, [0, 0, 0]]]},
+      {"now": 90, "players": [[1, [0, 0, 0]]]},
+      {"now": 106, "players": [[3, [14, 0, 0]]]},
+      {"now": 116, "players": [[1, [14, 0, 0]]]},
+      {"now": 126, "players": [[1, [28, 0, 0]]]},
+      {"now": 226, "players": []}
+    ]
+  },
+  "expected": {
+    "presentation": {
+      "assembly_heading": "0x0DE0000000006115",
+      "setup_heading": "0x0DE0000000006116",
+      "escort_objective": "0x0D80000000002933"
+    },
+    "steps": [
+      {"phase": "SETUP", "stage": 0, "distance": 0, "seconds": 1, "contested": false, "winner": null},
+      {"phase": "ACTIVE", "stage": 0, "distance": 0, "seconds": 60, "contested": false, "winner": null},
+      {"phase": "ACTIVE", "stage": 0, "distance": 0, "seconds": 55, "contested": true, "winner": null},
+      {"phase": "ACTIVE", "stage": 1, "distance": 14, "seconds": 65, "contested": false, "winner": null},
+      {"phase": "ACTIVE", "stage": 1, "distance": 14, "seconds": 49, "contested": false, "winner": null},
+      {"phase": "ACTIVE", "stage": 2, "distance": 28, "seconds": 49, "contested": false, "winner": null},
+      {"phase": "COMPLETE", "stage": 3, "distance": 42, "seconds": 0, "contested": false, "winner": 1},
+      {"phase": "COMPLETE", "stage": 3, "distance": 42, "seconds": 0, "contested": false, "winner": 1}
+    ],
+    "timeout_winner": 0,
+    "overtime_grace": 5
+  }
+}

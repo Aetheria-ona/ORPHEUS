@@ -16,7 +16,7 @@ from ow174.game import replay_values
 from ow174.game.collision import CollisionProvider, LoadState
 from ow174.game.collision_fingerprint import WorldRegistry
 from ow174.game.collision_tape import RecordingCollisionProvider, ReplayCollisionProvider
-from ow174.game.content import GameMap, Spawn, heroes
+from ow174.game.content import EscortMap, EscortRailPoint, GameMap, Spawn, heroes
 from ow174.game.environment import ExecutionEnvironment
 from ow174.game.environment_tape import RecordingEnvironment, ReplayEnvironment
 from ow174.game.match import RETAIL_QUANTA, no_skin
@@ -72,17 +72,38 @@ def _address(value):
     return value
 
 
-def _game_map(value):
-    _fields(value, {f.name for f in dataclasses.fields(GameMap)}, "GameMap")
-    if type(value["spawns"]) is not tuple:
+def _spawns(value):
+    if type(value) is not tuple:
         raise ServerJournalError("GameMap spawns must be a tuple")
     spawns = []
-    for spawn in value["spawns"]:
+    for spawn in value:
         _fields(spawn, {f.name for f in dataclasses.fields(Spawn)}, "Spawn")
         if type(spawn["position"]) is not tuple or len(spawn["position"]) != 3:
             raise ServerJournalError("invalid Spawn position")
         spawns.append(Spawn(**spawn))
-    return GameMap(**{**value, "spawns": tuple(spawns)})
+    return tuple(spawns)
+
+
+def _escort_map(value):
+    _fields(value, {f.name for f in dataclasses.fields(EscortMap)}, "EscortMap")
+    if type(value["rail"]) is not tuple or type(value["later_spawns"]) is not tuple:
+        raise ServerJournalError("Escort rail and spawn stages must be tuples")
+    rail = []
+    for point in value["rail"]:
+        _fields(point, {f.name for f in dataclasses.fields(EscortRailPoint)}, "EscortRailPoint")
+        rail.append(EscortRailPoint(**point))
+    later_spawns = tuple(_spawns(stage) for stage in value["later_spawns"])
+    return EscortMap(**{**value, "rail": tuple(rail), "later_spawns": later_spawns})
+
+
+def _game_map(value):
+    fields = {f.name for f in dataclasses.fields(GameMap)}
+    if type(value) is dict:
+        fields -= {"escort", "custom_start"} - value.keys()  # older journals omit both fields
+    _fields(value, fields, "GameMap")
+    escort = value.get("escort")
+    return GameMap(**{**value, "spawns": _spawns(value["spawns"]),
+                      "escort": _escort_map(escort) if escort is not None else None})
 
 
 def _handoffs(value):

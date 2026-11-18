@@ -827,11 +827,16 @@ class Combat:
 
     def spawned(self, player) -> None:
         """The player's client has the world: the game mode entity gets its UI graph (mode_frame). While
-        heroes are assembled the countdown's frames carry it."""
+        the countdown is active its frames carry the UI. Late viewers receive the completed countdown."""
+        from ow174.game.match import COUNTDOWN
+
         host = self.match.scene_host
-        if player.client is not None and not self.match.assembling() and not (host and host.client_ready):
+        if (player.client is not None and self.match.escort is None and not self.match.assembling()
+                and not (host and host.client_ready)):
+            values = {COUNTDOWN: 0.0} if self.match.assembled else {}
             player.client.queue_mode_frame(mode_frame(
-                {}, player.match.game_map.mode_guid, player.match.game_map.map_guid,
+                values, player.match.game_map.mode_guid, player.match.game_map.map_guid,
+                waiting=self.match.in_custom_warmup,
             ))
         self.voice.spawned(player, self.now)
 
@@ -2156,7 +2161,20 @@ def respawn_seconds(match) -> float:
     return PRACTICE_RESPAWN if match.controller is heroselect.PRACTICE else RESPAWN
 
 
-def mode_frame(entity_vars: dict, mode_guid: int | None = None, map_guid: int | None = None) -> BitWriter:
+def waiting_hud(instance_id: int) -> InstanceWire:
+    """The native 1FEB phase heading presenter and its localized Waiting For Players text."""
+    presentation = graph.graph(0x1FEB)
+    heading = 16
+    return InstanceWire(
+        instance_id, presentation,
+        vars={1923: (expr.Asset(0x0DE0000000000105), ())},
+        states={heading: StateWire(presentation.state(heading).cls, True)},
+    )
+
+
+def mode_frame(
+    entity_vars: dict, mode_guid: int | None = None, map_guid: int | None = None, *, waiting: bool = False,
+) -> BitWriter:
     """A plain full frame of the game mode entity: the mode's client UI graph 0CB6 as instance 1 (its
     client-only Entries make the kill feed 0DEA and the notices 1FC0) and the entity variables given (the
     PvP countdown). Every full frame of this entity has to list 0CB6, or it would destroy it."""
@@ -2169,7 +2187,8 @@ def mode_frame(entity_vars: dict, mode_guid: int | None = None, map_guid: int | 
 
     entrance = pve.entrance(mode_guid, map_guid) if mode_guid is not None else None
     if entrance is None:
-        return remote_full_frame([instance], values, {1: ui})
+        instances = [instance, waiting_hud(2)] if waiting else [instance]
+        return remote_full_frame(instances, values, {item.id: item.graph for item in instances})
     primary = entrance.graph
     states = {}
     if entrance.ready_state is not None:

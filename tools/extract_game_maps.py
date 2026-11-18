@@ -8,6 +8,8 @@ Inputs (all from an Overwatch 1.74 install through DataTool, OWLib):
 
     py tools/extract_game_maps.py --stu <dump> --raw <raw> --ents <ents>
 
+Pass --models with the local raw 00C cart models to add payload collision to the runtime catalog.
+
 Rules, from the client (image base 0x7FF788F10000):
 - Map placeables get one flat index over the placeable types whose flag is set in the type table
   0x7FF78BD36CE0 (builder 0x7FF78AA52900): light, area, entity, ... in that order. So the first
@@ -19,6 +21,7 @@ Rules, from the client (image base 0x7FF788F10000):
   index (entity id 0x80000000 | index).
 - Each tick the client drops entries whose identifier is not in the game mode's m_A43573F4
   (0x7FF78969EFD0). Entries without an identifier always stay.
+- Escort also creates modeled, server-owned entities that pass that mode's placement filter.
 - Spawn points are picked by target tag. The mode graphs give team 0 the tags 0x310 / 0x30D / 0x3CE
   and team 1 the tags 0x341 / 0x3CC / 0x3CD (control stages 0 / 1 / 2). Assault, escort and hybrid
   take the pair from the current objective: its var 10549 (0x2935) is the defenders' room and var
@@ -38,6 +41,7 @@ OUT = ROOT / "data" / "game_maps_174.json"
 NS = "{https://yretenai.com/dragonml/v1}"
 SPAWN = 0x737C5C41  # component bit 58
 REQUIRED = 0xCA1FB0B8  # component bit 94
+MODEL = 0x191835F9
 LIGHT, AREA, ENTITY = 7, 8, 9  # placeable types, byte 19 of each placeable
 TEAM_TAGS = {0x310: 0, 0x30D: 0, 0x3CE: 0, 0x341: 1, 0x3CC: 1, 0x3CD: 1}
 CONTROL_STAGES = {0x310: 0, 0x341: 0, 0x30D: 1, 0x3CC: 1, 0x3CE: 2, 0x3CD: 2}
@@ -46,6 +50,11 @@ FFA_TAG = 0x413
 OBJECTIVE_GRAPH = 0xF4C  # the objective graph that holds the spawn tags of assault/escort/hybrid
 POINT_GRAPH = 0xE8E  # capture point graph (its var 0x1DDB is the point name)
 PAYLOAD_GRAPH = 0x1225  # the payload's own graph
+PARAMETRIC_INSTANCE = 0xE42D9464
+TARGET_TAG_INSTANCE = 0xB1B9C667
+RAIL_POINT_DEFINITIONS = {0x0400000000000122, 0x0400000000002041, 0x0400000000002042}
+HEALTH_PACK_DEFINITIONS = {0x0400000000000FC2: "large", 0x0400000000000FC3: "small"}
+ESCORT_MODE = 0x15
 NAMES = {
     0x661: "Tutorial",
     0x751: "Numbani",
@@ -114,32 +123,114 @@ def read_map(raw: Path, index: int) -> tuple:
                 continue
             body = offset + 24
             definition, identifier = struct.unpack_from("<2Q", data, body)
-            entities.append(
-                {
-                    "definition": definition,
-                    "identifier": identifier,
-                    "position": struct.unpack_from("<3f", data, body + 24),
-                    "rotation": struct.unpack_from("<4f", data, body + 48),
-                    "client_id": struct.unpack_from("<H", data, body + 104)[0],
-                    "order": (int(path.name[:4], 16), offset),
-                }
-            )
+            entity = {
+                "definition": definition,
+                "identifier": identifier,
+                "position": struct.unpack_from("<3f", data, body + 24),
+                "scale": struct.unpack_from("<3f", data, body + 36),
+                "rotation": struct.unpack_from("<4f", data, body + 48),
+                "client_id": struct.unpack_from("<H", data, body + 104)[0],
+                "order": (int(path.name[:4], 16), offset),
+                "uuid": data[offset : offset + 16],
+            }
+            for component in range(struct.unpack_from("<I", data, body + 64)[0]):
+                entry = body + 112 + component * 8
+                kind, relative = struct.unpack_from("<II", data, entry)
+                if kind not in (1, 6):
+                    continue
+                blob = entry + relative
+                if data[blob : blob + 4] != b"DUTS":
+                    continue
+                instance = blob + struct.unpack_from("<I", data, blob + 8)[0]
+                cls = struct.unpack_from("<I", data, instance)[0]
+                if kind == 1 and cls == PARAMETRIC_INSTANCE:
+                    entity["rail_start"] = data[instance + 8 : instance + 24]
+                elif kind == 6 and cls == TARGET_TAG_INSTANCE and definition in RAIL_POINT_DEFINITIONS:
+                    # Three padded coefficients after the instance header, highest power first.
+                    entity["rail_curve"] = [
+                        struct.unpack_from("<3f", data, instance + n) for n in (16, 32, 48)
+                    ]
+            entities.append(entity)
     entities.sort(key=lambda e: e["order"])
     return counts.get(LIGHT, 0) + counts.get(AREA, 0), entities
 
 
-def components(stu: Path) -> dict:
-    """003 index -> set of component STU hashes (the definition's own m_componentMap)."""
-    table = {}
+def escort_rail(base: int, entities: list, objectives: list) -> list | None:
+    """Recover the consecutive authored cubics from the cart's destination UUID to the last goal."""
+    carts = [obj for obj in objectives if obj["kind"] == "payload"]
+    goals = sorted((obj for obj in objectives if obj["kind"] == "checkpoint"),
+                   key=lambda obj: obj["objective"])
+    if len(carts) != 1 or not goals:
+        return None
+    cart = entities[carts[0]["placeable"] - base]
+    start_id = cart.get("rail_start")
+    start = next((i for i, entity in enumerate(entities) if start_id and entity.get("uuid") == start_id), -1)
+    checkpoints = [goal["placeable"] - base for goal in goals]
+    if start < 0 or any(right <= left for left, right in zip([start, *checkpoints[:-1]], checkpoints,
+                                                           strict=True)):
+        return None
+    end = checkpoints[-1]
+    rail = []
+    for index in range(start, end + 1):
+        node = entities[index]
+        position = node["position"]
+        entry = {"position": [f32(v) for v in position]}
+        if index != end:
+            curve = node.get("rail_curve")
+            if curve is None:
+                return None
+            destination = tuple(map(sum, zip(position, *curve, strict=True)))
+            if not math.dist(destination, entities[index + 1]["position"]) < 0.01:
+                return None
+            entry["curve"] = [[f32(v) for v in coefficient] for coefficient in curve]
+        if index in checkpoints:
+            entry["checkpoint"] = base + index
+        rail.append(entry)
+    return rail
+
+
+def components(stu: Path) -> tuple[dict, dict]:
+    """Return the components and root model reference of each entity definition."""
+    table, models = {}, {}
     for path in (stu / "003").glob("*.003.xml"):
         root = ET.parse(path).getroot()
+        index = int(path.name.split(".")[0], 16)
         found = set()
         for node in root.iter():
             if node.get(NS + "name") == "m_componentMap":
                 found = {int(child.get(NS + "key")) & 0xFFFFFFFF for child in node if child.get(NS + "key")}
+                for component in node:
+                    if component.tag == "STUModelComponent":
+                        model = next((child.get("GUID") for child in component
+                                      if child.get(NS + "name") == "m_model"), None)
+                        if model and model.endswith(".00C"):
+                            models[index] = ref_index(model)
                 break
-        table[int(path.name.split(".")[0], 16)] = found
-    return table
+        table[index] = found
+    return table, models
+
+
+def escort_scene_placeables(base: int, entities: list, mirrored: list, allowed, definitions: dict) -> list:
+    """Include modeled, server-owned props that pass the mode's placement filter."""
+    return [
+        index for index in mirrored
+        if (entity := entities[index - base])["client_id"] == 0
+        and (not entity["identifier"] or entity["identifier"] in allowed)
+        and MODEL in definitions.get(entity["definition"] & 0xFFFFFFFF, ())
+    ]
+
+
+def escort_payload_shapes(entity: dict, models: dict, model_path: Path) -> list:
+    from ow174.game import props
+
+    model = models.get(entity["definition"] & 0xFFFFFFFF)
+    if model is None:
+        raise ValueError("Escort cart has no root model in the definition dump")
+    for name in (f"{model:012X}.00C", f"{guid(model, 0xC):016X}.bin"):
+        path = model_path / name
+        if path.is_file() and (shapes := props.model_shapes(path.read_bytes())):
+            return shapes
+    raise ValueError(f"Escort cart model {model:012X}.00C has no available mover shapes")
 
 
 def modes(stu: Path) -> dict:
@@ -226,13 +317,15 @@ def graph_vars(stus: list) -> dict:
     return out
 
 
-def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict) -> dict:
+def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict, *,
+              models: dict | None = None, model_path: Path | None = None) -> dict:
     index = header["map"]
     base, entities = read_map(raw, index)
     stus = instance_data(ents, header["index"])
     if len(stus) != len(entities):
         raise SystemExit(f"map {index:X}: {len(entities)} entities but {len(stus)} in the DataTool dump")
     placeables, identifiers, mirrored, spawns, objectives = [], {}, [], [], []
+    health_packs = []
     defense_tags, attack_tags = {}, {}
     for number, (entity, data) in enumerate(zip(entities, stus, strict=True)):
         flat = base + number
@@ -254,6 +347,8 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict) -
                     "attack_tag": hex_guid(guid(attack, 0x6C)) if attack else None,
                 }
             )
+            if values.get(0x2931) and values.get(0x2938):
+                objectives[-1]["escort_seconds"] = float(values[0x2938])
             if defense:
                 defense_tags.setdefault(defense, []).append(order)
             if attack:
@@ -282,6 +377,10 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict) -
         if not found & {SPAWN, REQUIRED}:
             if entity["client_id"] == 0:
                 mirrored.append(flat)
+                size = HEALTH_PACK_DEFINITIONS.get(entity["definition"])
+                # Placements with an identifier need a separate mode-specific selection rule.
+                if size is not None and not entity["identifier"]:
+                    health_packs.append({"kind": size, "placeable": flat})
             continue
         placeables.append(flat)
         if entity["identifier"]:
@@ -329,7 +428,7 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict) -
         by_mode[hex_guid(guid(mode, 0xC5))] = [
             p for p in placeables if str(p) not in identifiers or int(identifiers[str(p)], 16) in allowed
         ]
-    return {
+    entry = {
         "modes": [hex_guid(guid(m, 0xC5)) for m in header["modes"]],
         "placeables": placeables,
         "identifiers": identifiers,
@@ -338,7 +437,20 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict) -
         "spawns": spawns,
         "objectives": objectives,
         "mirrored": mirrored,
+        "health_packs": health_packs,
     }
+    if ESCORT_MODE in header["modes"]:
+        entry["escort_scene_placeables"] = escort_scene_placeables(
+            base, entities, mirrored, set(mode_ids.get(ESCORT_MODE, ())), defs,
+        )
+        if (rail := escort_rail(base, entities, objectives)) is not None:
+            entry["escort_rail"] = rail
+            if model_path is not None:
+                cart = next(obj for obj in objectives if obj["kind"] == "payload")
+                placement = entities[cart["placeable"] - base]
+                cart["collision"] = escort_payload_shapes(placement, models or {}, model_path)
+                cart["scale"] = placement["scale"]
+    return entry
 
 
 def map_name(header: dict, english: dict) -> str:
@@ -351,14 +463,14 @@ def map_name(header: dict, english: dict) -> str:
 
 
 def dump(maps: dict) -> str:
-    """JSON with one spawn, objective or list per line."""
+    """JSON with one placed entity, spawn or list per line."""
     lines = ["{"]
     for number, (key, entry) in enumerate(maps.items()):
         lines.append(f" {json.dumps(key)}: {{")
         fields = list(entry.items())
         for i, (field, value) in enumerate(fields):
             end = "," if i < len(fields) - 1 else ""
-            if field in ("spawns", "objectives") and value:
+            if field in ("spawns", "objectives", "health_packs") and value:
                 items = [f"   {json.dumps(v, ensure_ascii=False)}" for v in value]
                 lines.append(f"  {json.dumps(field)}: [")
                 lines.append(",\n".join(items))
@@ -375,16 +487,18 @@ def main() -> None:
     parser.add_argument("--stu", type=Path, required=True, help="STU dump with 003, 09F and 0C5 as XML")
     parser.add_argument("--raw", type=Path, required=True, help="folder that holds the raw 0BC map chunks")
     parser.add_argument("--ents", type=Path, required=True, help="dump-map-entities output folder")
+    parser.add_argument("--models", type=Path, help="raw cart 00C models, to include mover collision")
     args = parser.parse_args()
     raw = args.raw / "0BC" if (args.raw / "0BC").is_dir() else args.raw
-    defs, mode_ids = components(args.stu), modes(args.stu)
+    defs, models = components(args.stu)
+    mode_ids = modes(args.stu)
     english = json.loads((ROOT / "data" / "extracted_maps.json").read_text(encoding="utf-8"))
     maps = {}
     for header in headers(args.stu):
         if not header["modes"] or "map" not in header:
             continue
         entry = {"name": map_name(header, english), "state": header["state"]}
-        entry.update(build_map(header, raw, args.ents, defs, mode_ids))
+        entry.update(build_map(header, raw, args.ents, defs, mode_ids, models=models, model_path=args.models))
         maps[hex_guid(guid(header["map"], 0x2))] = entry
     OUT.write_text(dump(maps), encoding="utf-8")
     print(f"{len(maps)} maps -> {OUT}")

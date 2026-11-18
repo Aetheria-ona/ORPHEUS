@@ -49,6 +49,8 @@ For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHAN
 
 - [ ] **Research & Data Preparation:** 95 catalog maps have extracted collision caches; external runtime bundle excludes raw game assets and private signing/content keys.
 - [ ] **Lobby, Accounts & Communication Wheel:** login, hero select, skin equip, persisted settings (`22200`–`22204`), equipped voice lines, sprays, and emotes (Mercy Relax/Flurry weapon & 3P camera verified on 104319; displacement emotes like 「有胆就来」 still need root-motion work).
+- [x] **Private custom room basics:** original client verified creation, team switching, map preview, map loading and return to the room.
+- [ ] **Custom matches:** verify remaining lobby and hero selection presentation, shared room admission, and Escort gates, pickup and full round flow.
 - [ ] **Network Synchronization:** reliable body creates/retirements, packet budget trimming, and uint32 command rollover guards pass headless loopback tests; preventing recycled body IDs from receiving stale combat notices (#12) remains open.
 - [ ] **Maps & Environment:** static collision caches built, but Practice Range out-of-bounds death plane / respawn (#13) and dynamic player-vs-player collision blocking remain open.
 - [ ] **HUD, Audio & Kill Feed:** enemy bot overhead HP bars (#7), localized bot names in kill feed (#8), headshot audio (#9), Athena multikill audio (#10), and bot death voice listeners (#11) remain open.
