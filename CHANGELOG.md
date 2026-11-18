@@ -9,6 +9,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Add a prepared-runtime test runner with private logs, manifest fingerprints, platform-specific failure baselines and a limit on skipped tests.
 - Restore nine entity lifecycle tests that stopped before their assertions when the test match lacked the optional scene host. The prepared suite now checks create acknowledgements, retries and entity ID reuse with an ordinary match's initial scene-host state.
 - StateScript queries and the remix event catalog test now read metadata from the selected runtime pack. The StateScript query cache distinguishes packs, and test discovery can list query tests before loading their index.
+- Restore prepared Deadeye aim and cleanup checks by verifying the registered effect instance. Exercise objective messages on the listener attached by body startup. The checks detect an effect left alive after target exit and duplicate objective delivery.
 - Verify both Sprint movement modifiers and their operands across runtime packs that serialize the same object fields in different orders.
 - Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
 - Add a tag-specific verification form and a revision-pinned Soldier parity matrix. Record the kill-feed and combat HUD observations separately in the Python status notes.
