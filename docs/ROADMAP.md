@@ -16,7 +16,7 @@ For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHAN
 | **M3 · Single-Player Combat** | Hit/miss/kill/respawn, overhead HP, elimination banner & kill feed | Server combat/respawn works; bot HP bar (#7), kill feed name (#8), headshot sound (#9) open. |
 | **M4 · Two-Client Combat** | Synchronized movement, LOS, combat, and respawn across two clients | Collision movement & loopback checks pass; two-client original-client session pending. |
 | **M5 · Modes & Heroes** | Full match lifecycle, objectives, and abilities across supported heroes | Practice Range, Tutorial & 47 PvE cards enter cleanly; Doomfist/Wrecking Ball/McCree partial. |
-| **M6 · Reliability & Release** | Tick latency budgets, fault isolation, clean Windows deployment | Server-only startup & packet budget guards pass; multi-client latency measurements open. |
+| **M6 · Reliability & Release** | Tick latency budgets, fault isolation, clean Windows deployment | Server-only startup & packet budget guards pass; [loopback worker measurements](PERFORMANCE.md) track server timing; multi-client playtest latency remains open. |
 
 ---
 
