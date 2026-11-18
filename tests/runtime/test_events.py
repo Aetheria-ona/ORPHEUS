@@ -26,6 +26,7 @@ from ow174.content.identity import Identity  # noqa: E402
 from ow174.content.retail import RetailReplay  # noqa: E402
 from ow174.jam.codec import Schemas  # noqa: E402
 from ow174.jam.groups import CONFIG, EVENTS  # noqa: E402
+from ow174.paths import DATA_DIR  # noqa: E402
 
 
 class EventTests(unittest.TestCase):
@@ -109,7 +110,7 @@ class EventTests(unittest.TestCase):
         self.assertEqual(EVENT_PRESETS["reaper"].rewards, (0x4DC7, 0x4EF3, 0x4FCF))
 
     def test_remix_selectors_match_extracted_client_catalog(self):
-        extracted = json.loads((ROOT / "data/extracted_events_174.json").read_text(encoding="utf-8"))
+        extracted = json.loads((DATA_DIR / "extracted_events_174.json").read_text(encoding="utf-8"))
         rows = {r["celebration"]: r for r in extracted["lobby_mappings"] if r["region"] == "default"}
         for name in ("anniversary", "anniversary_remix_1", "anniversary_remix_2"):
             row = rows[f"{EVENT_PRESETS[name].celebration:012X}.0C3"]

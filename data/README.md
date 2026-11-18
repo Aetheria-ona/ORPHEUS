@@ -61,6 +61,12 @@ Add `--catalogs $catalogs` to inject the catalogs generated in step 1, or `--cli
 
 ## Optional & Extended Runtime Tables
 
+### StateScript Queries and Event Tests
+
+Place `statescript_names_174.json` in the selected pack's `data/` directory to run `tools/ssq.py` and `tests/runtime/test_ssq.py`. The query tool also reads `statescript_codecs_174.json` there when available. Its index cache stays under the checkout's `cache/`.
+
+The remix-selector test in `tests/runtime/test_events.py` reads `data/extracted_events_174.json` from the same pack. The names and event tables are optional for server startup. Add them locally when running the corresponding tools or tests.
+
 ### Emote Aliases, Blend Trees & Animation Durations
 
 To enable equipped emotes in the communication wheel, add `emote_aliases_174.json`, `emote_blend_trees_174.json`, `emote_tagged_174.json`, and `emote_durations_174.json` (plus optional `emote_clips_174.json` and `emote_scalar_tracks_174.json`) to `data/`:

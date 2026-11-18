@@ -51,9 +51,10 @@ sys.path.insert(0, str(ROOT))
 from ow174.game import content  # noqa: E402
 from ow174.game.script import expr, nodes, runtime  # noqa: E402
 from ow174.game.script import graph as graphs  # noqa: E402
+from ow174.paths import DATA_DIR  # noqa: E402
 
-NAMES_PATH = ROOT / "data" / "statescript_names_174.json"
-CODECS_PATH = ROOT / "data" / "statescript_codecs_174.json"  # optional, tools/extract_statescript_codecs.py
+NAMES_PATH = DATA_DIR / "statescript_names_174.json"
+CODECS_PATH = DATA_DIR / "statescript_codecs_174.json"  # optional, tools/extract_statescript_codecs.py
 CACHE_PATH = ROOT / "cache" / "ssq_index.pickle"
 # Optional: TankLib/STU/Types of an OWLib checkout, for each field's declared type and offset.
 OWLIB_TYPES = Path(os.environ["OWLIB_TYPES"]) if os.environ.get("OWLIB_TYPES") else None
@@ -411,7 +412,7 @@ def label(value) -> str:
 def signature() -> tuple:
     files = [(path.name, path.stat().st_size, path.stat().st_mtime_ns) for path in SOURCES if path.is_file()]
     owlib = OWLIB_TYPES.stat().st_mtime_ns if OWLIB_TYPES and OWLIB_TYPES.is_dir() else None
-    return VERSION, tuple(files), owlib
+    return VERSION, str(DATA_DIR), tuple(files), owlib
 
 
 def load_index(rebuild: bool = False) -> dict:
