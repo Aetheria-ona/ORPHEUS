@@ -3,10 +3,9 @@
 import logging
 import subprocess
 import sys
+import tomllib
 from importlib import metadata
 from pathlib import Path
-
-import tomllib
 
 from ow174.launcher import LaunchError
 from ow174.paths import PROJECT_FILE

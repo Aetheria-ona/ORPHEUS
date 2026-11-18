@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -179,7 +179,7 @@ def run_probe(
         "player": player,
         "token": token,
         "timeout_seconds": timeout,
-        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "started_utc": datetime.now(UTC).isoformat(),
         "status": "starting",
         "request": None,
         "ack_record": None,
@@ -294,10 +294,10 @@ def run_probe(
             emit("Waiting for reset interrupted. Check the search lock; the published reset was not deleted.")
             exit_code = 130
         report["elapsed_seconds"] = clock() - started
-        report["finished_utc"] = datetime.now(timezone.utc).isoformat()
+        report["finished_utc"] = datetime.now(UTC).isoformat()
         directory = repo / "logs" / "probes"
         directory.mkdir(parents=True, exist_ok=True)
-        name = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex + ".json"
+        name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex + ".json"
         destination = directory / name
         report["report_path"] = str(destination)
         with destination.open("x", encoding="utf-8") as stream:
