@@ -16,6 +16,12 @@ These observations come from earlier playtests. Acceptance of the current Python
 | **Doomfist (Practice Range)** | Rocket Punch charges, dashes (`~6.5 m` min / `~20 m` full), stops at walls, keeps direction while turning view, and walks while charging (`2.7–2.8 m/s`); view stays anchored above floor. | Target damage/knockback (#36), Hand Cannon bot damage & shots 2–4 audio (#5), Uppercut bot knockup (#37), Meteor Strike early landing (#38), Slam live retest (#6), and 1P gauntlet offset (#47). |
 | **Communication Wheel** | Mercy「放松」and「权舞风起」display correct weapon models and 3P camera framing; equipped voice lines (`Hello`, `Thanks`, `Need Healing`, `7E05`) play. | Displacement-driven emotes (Doomfist「有胆就来」, Bastion「行尸走械」, Mei「僵尸跳」). |
 
+### Training-bot eliminations on the original client
+
+The author of draft [PR #99](https://github.com/leafall903/ORPHEUS/pull/99) reports that a training bot's death event produced a named entry in the top-right feed on their test branch. With the legacy combat notice disabled, the center elimination banner was absent and the ultimate meter kept updating. Enabling the notice restored the banner, but the ultimate meter froze. The author also observed stale health and ammo displays while their underlying values changed. The [earlier feed research](https://github.com/leafall903/ORPHEUS/blob/5d86bcb2c70d6d28ab835df3ee356ae90ee4f005/docs/research/kill-feed.md) records separate observations about profile settings and bot event delivery.
+
+Acceptance on the Python reference remains open. On build `104319`, record the commit and locale, then check the localized victim name in the center banner and the top-right feed separately. Repeat after the bot respawns and check that firing, taking damage and earning ultimate charge still update the corresponding HUD values. Record a named player control or delayed delivery separately when available. [Issue #8](https://github.com/leafall903/ORPHEUS/issues/8)
+
 ---
 
 ## Automated Server & Protocol Coverage
@@ -30,10 +36,10 @@ These observations come from earlier playtests. Acceptance of the current Python
   - Loopback UDP lifecycle suites cover 10x Soldier/Reaper swaps, 10x leave/rejoins, packet loss, and ACK retries.
 - **Public checks.** Windows and Ubuntu CI run Ruff, Python discovery without runtime data, the launcher injection suite, and the dashboard and console Node tests. At `3eefae6b`, Windows discovery ran 977 tests, including 2 skips.
 - **Cross-language contract coverage.** [#61](https://github.com/leafall903/ORPHEUS/issues/61) closed after [#79](https://github.com/leafall903/ORPHEUS/issues/79) added Rust consumers for four movement and action fixtures and [#80](https://github.com/leafall903/ORPHEUS/issues/80) added Python StateScript consumers. See [the contract guide](BEHAVIOR_CONTRACTS.md) for the tests.
+- **Recycled player body IDs.** In the prepared [combat-notice suite](../tests/runtime/test_game_bot_notices.py), a lost hit retries against the previous body. The allocator skips that ID while a peer still has a reliable notice outstanding. A retried destroy must be acknowledged and the reuse delay must expire before the ID becomes available. Exhausting all 255 IDs preserves the current body. On 2026-11-18 the existing 42 tests passed on Linux ARM64 at `3eefae6b` and Windows at `45044d0d`. The full-switch regression also exercises a lost hit across 255 switch attempts. See [#12](https://github.com/leafall903/ORPHEUS/issues/12) for the runtime fingerprint and reproduction command.
 
 ---
 
 ## Remaining Architecture / Transport Gaps
 
-- **Server-owned bug ([#12](https://github.com/leafall903/ORPHEUS/issues/12)):** Reliable combat notices already in the resend queue can still target a numeric body ID recycled after 255 hero switches before the notice is ACKed.
 - **Draft PR [#32](https://github.com/leafall903/ORPHEUS/pull/32):** Full 32-hero Python integration candidate (`codex/python-hero-upstream-20261113`) needs conflict reconciliation and CI cleanup before any merge to `main`.

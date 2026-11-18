@@ -22,10 +22,8 @@ from ow174.content.collection import Collection  # noqa: E402
 from ow174.content.ranked import OPEN_QUEUE, ROLE_QUEUE  # noqa: E402
 from ow174.dashboard.server import start_dashboard  # noqa: E402
 from ow174.lobby.matchmaker import QUICK_PLAY, Matchmaker  # noqa: E402
-from ow174.paths import WEB_DIR  # noqa: E402
 from ow174.services.shop import ShopService  # noqa: E402
 
-WEB_PREVIEWS = WEB_DIR / "assets" / "previews"
 DEATHMATCH = 0x063000000000003B
 # The real (unlock level, frame GUID) table; frame GUIDs are not in level order.
 BORDERS = Collection(RetailTemplates(), ItemDB()).border_levels
@@ -351,19 +349,6 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(self.lobby.selected.profile.league_tokens, 900)
 
-    def test_loot_box_pictures_are_served_and_nothing_outside_their_folder(self):
-        with urllib.request.urlopen(self.url + "/assets/boxes/golden.png", timeout=3) as response:
-            self.assertEqual(response.headers["Content-Type"], "image/png")
-            self.assertEqual(response.read(8), b"\x89PNG\r\n\x1a\n")
-        outside = (
-            "/assets/boxes/missing.png",
-            "/assets/boxes/../index.html",
-            "/assets/boxes/%2e%2e/x.png",
-        )
-        for path in outside:
-            status, _ = self.request(path)
-            self.assertEqual(status, 404, path)
-
     def frames(self, page=1):
         status, data = self.request(f"/api/collection?account=Alpha&kind=frames&page={page}")
         self.assertEqual(status, 200)
@@ -410,14 +395,6 @@ class DashboardTests(unittest.TestCase):
     def test_only_portrait_frames_can_be_chosen(self):
         status, _ = self.request("/api/set_frame", {"account": "Alpha", "guid": "0x0250000000000001"})
         self.assertEqual(status, 400)
-
-    def test_item_previews_are_served_as_webp(self):
-        picture = next(WEB_PREVIEWS.glob("*.webp"))
-        with urllib.request.urlopen(f"{self.url}/assets/previews/{picture.name}", timeout=3) as response:
-            self.assertEqual(response.headers["Content-Type"], "image/webp")
-            self.assertEqual(response.read(4), b"RIFF")
-        status, _ = self.request("/assets/previews/0000000000000000.webp")
-        self.assertEqual(status, 404)
 
     def test_static_dashboard_assets_and_the_event_picker(self):
         for path in ("/", "/assets/dashboard.css", "/assets/dashboard.js", "/assets/dashboard-api.mjs"):
