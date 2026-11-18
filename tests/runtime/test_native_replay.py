@@ -285,7 +285,7 @@ class NativeReplayTests(unittest.TestCase):
             run = Run()
         player = run.players[0]
         document = {"header": header(player.body_script), "events": []}
-        # Compare with the actual constructor boundary, which saw the Match owner's mover pose.
+        # Compare with the actual constructor boundary, which saw the Match owner's movement sample.
         # Subsequent projectile-lease discovery allocates additional inactive states.
         constructor_hash, initial_snapshot = constructor_snapshots[player.body_script]
         actual_snapshot = stored_snapshot(player.body_script)
@@ -319,7 +319,7 @@ class NativeReplayTests(unittest.TestCase):
         self.assertEqual(result["status"], "incomplete")
         self.assertEqual(result["validated_commands"], 0)
         self.assertEqual(result["diagnostics"], [{"kind": "initial_state_mismatch"}])
-        # The isolated replay also lacks the owner's pose during construction itself.
+        # The isolated replay also lacks the owner's movement sample during construction itself.
         self.assertNotEqual(result["final_hash"], constructor_hash)
 
     def test_isolated_wheel_trace_replays_equipment_and_grounded_input(self):
