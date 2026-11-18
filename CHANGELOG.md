@@ -7,6 +7,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 ### 2026-11-18
 
 - Add a prepared-runtime test runner with private logs, manifest fingerprints, platform-specific failure baselines and a limit on skipped tests.
+- Restore nine entity lifecycle tests that stopped before their assertions when the test match lacked the optional scene host. The prepared suite now checks create acknowledgements, retries and entity ID reuse with an ordinary match's initial scene-host state.
 
 - Clarify which branch to use for Python playtests and Rust migration. The status and contract guides now link the completed cross-language coverage work and distinguish earlier client observations from the next playtest.
 
