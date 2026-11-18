@@ -1118,14 +1118,21 @@ class Client:
         except (DecodeError, KeyError, EOFError) as error:
             self.log(f"[<<<] undecodable messages: {error} {payload.hex()}", logging.WARNING)
             return
-        for seq, msg_id, value in reliable:
-            self._reliable_in(seq, msg_id, value, now)
-        for msg_id, value in unreliable:
-            self._message(msg_id, value, now)
+        input_error = None
         try:
             commands = read_commands(reader)
         except InputError as error:
-            self.log(f"[<<<] undecodable input: {error}", logging.DEBUG)
+            commands, input_error = [], error
+        frame = commands[-1].frame if commands else None
+        for seq, msg_id, value in reliable:
+            self._reliable_in(seq, msg_id, value, now, command_frame=frame)
+        for msg_id, value in unreliable:
+            if msg_id == COMMUNICATION_ACTION and frame is None:
+                self._message(msg_id, value, now, command_frame=self.player.commands.last_frame)
+            else:
+                self._message(msg_id, value, now, command_frame=frame)
+        if input_error is not None:
+            self.log(f"[<<<] undecodable input: {input_error}", logging.DEBUG)
             return
         if commands and self.player.spawned:
             boundary = self.player.take_commands(commands)
@@ -1133,16 +1140,23 @@ class Client:
                 self.log(f"[!] command clock boundary at {boundary:08X}; leaving", logging.WARNING)
                 self.server.take_out(self.player, "command clock boundary", now=now)
 
-    def _reliable_in(self, seq: int, msg_id: int, value: dict, now: float) -> None:
+    def _reliable_in(
+        self, seq: int, msg_id: int, value: dict, now: float, *, command_frame: int | None = None,
+    ) -> None:
         if seq < self.expected_in:
             return  # a repeat
-        self.parked_in[seq] = (msg_id, value)
+        if msg_id == COMMUNICATION_ACTION:
+            # A queued wheel selection keeps the frame from its first receipt.
+            frame = self.player.commands.last_frame if command_frame is None else command_frame
+            self.parked_in.setdefault(seq, (msg_id, value, frame))
+        else:
+            self.parked_in[seq] = (msg_id, value)
         while self.expected_in in self.parked_in:
-            msg_id, value = self.parked_in.pop(self.expected_in)
+            msg_id, value, *arrival = self.parked_in.pop(self.expected_in)
             self.expected_in += 1
-            self._message(msg_id, value, now)
+            self._message(msg_id, value, now, command_frame=arrival[0] if arrival else None)
 
-    def _message(self, msg_id: int, value: dict, now: float) -> None:
+    def _message(self, msg_id: int, value: dict, now: float, *, command_frame: int | None = None) -> None:
         if msg_id == PING:
             environment = self.server.environment
             self.queue_reliable(
@@ -1157,7 +1171,7 @@ class Client:
         if msg_id in MAP_LOADED:
             self.player.match.map_loaded(self.player, now)
         if msg_id == COMMUNICATION_ACTION:
-            self.player.match.communication_action(self.player, value)
+            self.player.match.communication_action(self.player, value, command_frame=command_frame)
             return
         if msg_id == GAME_MESSAGE:
             self.player.match.game_message(self.player, value, now)

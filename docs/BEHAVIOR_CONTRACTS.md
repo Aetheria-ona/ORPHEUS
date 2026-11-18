@@ -41,6 +41,7 @@ ORPHEUS uses small, language-neutral JSON fixtures under `fixtures/behavior/` so
 | [body-short-action-retry-v1.json](../fixtures/behavior/body-short-action-retry-v1.json) | Owner & observer short frame-action encoding, retry with original stamp across loss, and ACK retirement | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
 | [server-only-movement-v1.json](../fixtures/behavior/server-only-movement-v1.json) | Channel-2 direction mod throttles (`0D06` Rocket Punch dash) & owner record window (+250 ms tail) | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
 | [emote-weapon-selection-v1.json](../fixtures/behavior/emote-weapon-selection-v1.json) | Weapon manager selects an available slot for emotes and keeps the equipped slot on normal branch re-entry | `tests.public.test_behavior_contracts` | Pending Rust coverage |
+| [wheel-spray-pose-v1.json](../fixtures/behavior/wheel-spray-pose-v1.json) | Confirmed spray command pose and eye spring offset across retries and fallback | `tests.public.test_wheel_spray_pose_contract` | Pending Rust coverage |
 
 Run all public contracts locally without runtime data:
 
@@ -55,3 +56,4 @@ python -S -B -m unittest tests.public.test_behavior_contracts tests.public.test_
 | [wheel-emote-presentation-v1.json](../fixtures/behavior/wheel-emote-presentation-v1.json) | Equipped emote controller slots, owner `023A` resource/camera framing, and angle-lock lifecycle | `tests/runtime/test_communication_wheel.py` |
 | [wheel-emote-weapon-v1.json](../fixtures/behavior/wheel-emote-weapon-v1.json) | Mercy keeps her staff during and after Relax, Flurry and Caduceus in Practice Range and solo Hybrid, followed by a manual switch | `tests/runtime/test_communication_wheel.py` |
 | [player-voice-v1.json](../fixtures/behavior/player-voice-v1.json) | Equipped hero voice-line lookup and friendly vs. hostile listener delivery | `tests/runtime/test_game_voicelines.py` |
+| [wheel-spray-possession-v1.json](../fixtures/behavior/wheel-spray-possession-v1.json) | Equipped spray slots and empty slots on hero switch | `tests/runtime/test_communication_wheel.py` |
