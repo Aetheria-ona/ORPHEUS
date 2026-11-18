@@ -1,6 +1,8 @@
 # ORPHEUS Development Guidelines
 
 - **Target build:** Overwatch 1 retail `1.74.0.0.104319`. Prefer evidence pinned to `104319` and shared mechanisms across heroes and maps.
+- **Pull request bases:** Explicitly target `main` for Python and `rust` for Rust, including after the [default branch change](docs/BRANCH_TRANSITION.md).
+- **Pull request scope:** Group related fixes, focused commits and their tests into one reviewable milestone. While its topic branch and PR are open, add routine fixes for that milestone to the same branch and PR. Open a separate PR for independently reviewable work with a different scope.
 - **Branches:**
   - `main` holds the Python reference server, launchers, data extractors, and public/runtime suites.
   - Hero-ability changes to the Python reference server go through topic PRs targeting `main`.

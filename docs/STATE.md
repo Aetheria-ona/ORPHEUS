@@ -16,6 +16,12 @@ These observations come from earlier playtests. Acceptance of the current Python
 | **Doomfist (Practice Range)** | Rocket Punch charges, dashes (`~6.5 m` min / `~20 m` full), stops at walls, keeps direction while turning view, and walks while charging (`2.7–2.8 m/s`); view stays anchored above floor. | Target damage/knockback (#36), Hand Cannon bot damage & shots 2–4 audio (#5), Uppercut bot knockup (#37), Meteor Strike early landing (#38), Slam live retest (#6), and 1P gauntlet offset (#47). |
 | **Communication Wheel** | Mercy「放松」and「权舞风起」display correct weapon models and 3P camera framing; equipped voice lines (`Hello`, `Thanks`, `Need Healing`, `7E05`) play. | Displacement-driven emotes (Doomfist「有胆就来」, Bastion「行尸走械」, Mei「僵尸跳」). |
 
+### Training-bot eliminations on the original client
+
+The author of draft [PR #99](https://github.com/leafall903/ORPHEUS/pull/99) reports that a training bot's death event produced a named entry in the top-right feed on their test branch. With the legacy combat notice disabled, the center elimination banner was absent and the ultimate meter kept updating. Enabling the notice restored the banner, but the ultimate meter froze. The author also observed stale health and ammo displays while their underlying values changed. The [earlier feed research](https://github.com/leafall903/ORPHEUS/blob/5d86bcb2c70d6d28ab835df3ee356ae90ee4f005/docs/research/kill-feed.md) records separate observations about profile settings and bot event delivery.
+
+Acceptance on the Python reference remains open. On build `104319`, record the commit and locale, then check the localized victim name in the center banner and the top-right feed separately. Repeat after the bot respawns and check that firing, taking damage and earning ultimate charge still update the corresponding HUD values. Record a named player control or delayed delivery separately when available. [Issue #8](https://github.com/leafall903/ORPHEUS/issues/8)
+
 ---
 
 ## Automated Server & Protocol Coverage
