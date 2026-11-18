@@ -904,7 +904,11 @@ def entity_index(text: str) -> int:
 def write_bundle(output: Path, data: dict) -> None:
     content = {key: value for key, value in data.items() if key != "_reason"}
     text = json.dumps(content, separators=(",", ":"), ensure_ascii=False)
-    output.write_bytes(gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0))
+    with (
+        output.open("wb") as raw,
+        gzip.GzipFile(filename="", fileobj=raw, mode="wb", compresslevel=9, mtime=0) as bundle,
+    ):
+        bundle.write(text.encode("utf-8"))
 
 
 def map_source(text: str) -> tuple[int, Path]:

@@ -63,9 +63,9 @@ Add `--catalogs $catalogs` to inject the catalogs generated in step 1, or `--cli
 
 ### StateScript Queries and Event Tests
 
-Place `statescript_names_174.json` in the selected pack's `data/` directory to run `tools/ssq.py` and `tests/runtime/test_ssq.py`. The query tool also reads `statescript_codecs_174.json` there when available. Its index cache stays under the checkout's `cache/`.
+Place `statescript_names_174.json` in the prepared source's `data/` directory for `tools/ssq.py` and `tests/runtime/test_ssq.py`. The packer copies it into the output and records its SHA-256 in the manifest. The query tool also reads `statescript_codecs_174.json` there when available. Its index cache stays under the checkout's `cache/`.
 
-The remix-selector test in `tests/runtime/test_events.py` reads `data/extracted_events_174.json` from the same pack. The names and event tables are optional for server startup. Add them locally when running the corresponding tools or tests.
+The remix-selector test in `tests/runtime/test_events.py` reads `data/extracted_events_174.json` from the same pack. The packer copies and fingerprints this table when supplied. Both tables are optional for server startup.
 
 ### Emote Aliases, Blend Trees & Animation Durations
 

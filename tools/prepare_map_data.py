@@ -23,7 +23,7 @@ def write_practice_map(output: Path) -> None:
             "spawns": [asdict(spawn) for spawn in scene.spawns],
         },
     }
-    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def write_collision_index(game: Path, data_tool: Path, maps: set[int], output: Path) -> None:
@@ -35,7 +35,7 @@ def write_collision_index(game: Path, data_tool: Path, maps: set[int], output: P
     if records.keys() != set(chunks.values()):
         raise ValueError("The local collision index does not cover the selected map chunks")
     data = {f"0x{map_guid:016X}": records[guid] for map_guid, guid in chunks.items()}
-    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def write_practice_props(game: Path, data_tool: Path, output: Path) -> None:
@@ -94,7 +94,7 @@ def write_practice_props(game: Path, data_tool: Path, output: Path) -> None:
         "models": models,
         "modes": {f"0x{scene.mode_guid:016X}": []},
     }
-    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def _guid_list(guids) -> str:
