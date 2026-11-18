@@ -83,6 +83,9 @@ Match hooks such as projectile-lease discovery can first allocate inactive state
 such hooks is not a constructor-only baseline; replay reports initial_state_mismatch. A header taken
 before an unrecorded hook reports a later boundary mismatch. Those operations need explicit capture
 in the full battle recorder; ignoring their order to obtain a matching body trace would be unsound.
+The live body can also read the owner's movement sample during construction and commands. This Match
+input is outside v2. Even with no projectile leases or commands, it can make the recorded initial
+hash differ from the isolated constructor. Replay then reports initial_state_mismatch before events.
 Unrecorded set_health/set_ult_charge/messages/voice state operations can cause before/final hash
 mismatch, which is reported incomplete; not every possible external event is recorded by this format.
 Even a closed matching trace only validates the observed body boundary sequence. It does not establish

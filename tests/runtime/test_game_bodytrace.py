@@ -14,6 +14,7 @@ import test_game_combat as combat_tests
 
 from ow174.game import bodytrace, native_replay, projectiles
 from ow174.game.commands import FIRE, Command
+from ow174.game.match import Match
 
 
 class BodyTraceTests(unittest.TestCase):
@@ -32,7 +33,29 @@ class BodyTraceTests(unittest.TestCase):
             [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] for path in paths
         ]
 
+    def use_body_only_movement(self):
+        # V2 reconstructs a BodyScript without a Match mover. Keep this input
+        # absent on both sides to exercise the later command, lease or fault boundary.
+        self.enterContext(mock.patch.object(Match, "script_owner_movement_sample", return_value=None))
+
+    def test_match_movement_sample_is_an_unrecorded_constructor_input(self):
+        with mock.patch.object(projectiles, "definitions", return_value=()):
+            run = combat_tests.Run()
+        player = run.players[0]
+        self.addCleanup(run.match.stop_body_script, player)
+        self.assertIsNotNone(run.match.script_owner_movement_sample(player.body))
+        run.match.stop_body_script(player)
+        (lines,) = self.read()
+        header, events = lines[0]["header"], lines[1:]
+        self.assertEqual([event["kind"] for event in events], ["end"])
+        self.assertEqual(events[0]["final_hash"], header["initial_hash"])
+        result = native_replay.replay_document({"header": header, "events": events})
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["diagnostics"], [{"kind": "initial_state_mismatch"}])
+        self.assertEqual(result["validated_commands"], 0)
+
     def test_creation_commands_and_retirement_have_a_continuous_body_only_trace(self):
+        self.use_body_only_movement()
         # Projectile-lease discovery first accesses states after capture starts.
         # This scenario explicitly omits that hook; the next test covers the real hook.
         with mock.patch.object(projectiles, "definitions", return_value=()):
@@ -71,6 +94,7 @@ class BodyTraceTests(unittest.TestCase):
         self.assertFalse(result["complete_native_capture"])
 
     def test_real_match_first_access_after_header_is_captured_as_an_incomplete_boundary(self):
+        self.use_body_only_movement()
         run = combat_tests.Run()
         player = run.players[0]
         self.addCleanup(run.match.stop_body_script, player)
@@ -109,6 +133,7 @@ class BodyTraceTests(unittest.TestCase):
         run.match.stop_body_script(player)
 
     def test_command_fault_closes_capture_with_an_explicit_incomplete_result(self):
+        self.use_body_only_movement()
         run = combat_tests.Run()
         player = run.players[0]
         script = player.body_script
