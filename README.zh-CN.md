@@ -1,11 +1,13 @@
 # ORPHEUS
 
-[English](README.md) · [Discord](https://discord.gg/tqukqjAk7) · [Rust 分支](https://github.com/leafall903/ORPHEUS/tree/rust)
+[English](README.md) · [Discord](https://discord.gg/tqukqjAk7) · [Rust 分支迁移说明](docs/BRANCH_TRANSITION.md)
 
 ORPHEUS 是面向 **《守望先锋 1》1.74.0.0.104319** 版本的开源服务端复刻与协议研究项目。
 
-- **`main`（当前分支）** 包含 Python 参考服务端。靶场试玩、Windows 启动器、运行数据准备和 Python 测试都从这里开始。首个可玩版本仍在开发中。
-- **`rust`** 包含实验性的原生 Rust 专用服务器。迁移以 Python 服务端在原版客户端上验收过的玩法为准。
+**分支切换定于 2026 年 11 月 19 日（周四）12:00 UTC，即赫尔辛基时间 14:00。** 当前 Python `main` 将更名为只读的 `python-archive`，Rust 的 `rust` 将更名为默认分支 `main`。切换前 Python PR 仍提交到当前 `main`。切换后 Python 停止维护，归档分支不再接受新 PR。Rust 仍为开发预览版。[切换步骤与本地仓库更新说明（英文）](docs/BRANCH_TRANSITION.md)。
+
+- **Python（这份代码）** 包含参考服务端。靶场试玩、Windows 启动器、运行数据准备和 Python 测试都从这里开始。首个可玩版本仍在开发中。
+- **Rust** 提供实验性的原生 Rust 专用服务器。迁移以 Python 服务端在原版客户端上验收过的玩法为准。
 
 [本地训练靶场](#本地训练靶场单人测试) · [加入现有服务器](#加入现有服务器) · [当前进度](#当前进度) · [贡献指南](CONTRIBUTING.md) · [问题列表](https://github.com/leafall903/ORPHEUS/issues)
 
