@@ -44,6 +44,9 @@ The tables list selected fixtures. The [fixture directory](../fixtures/behavior/
 | [server-only-movement-v1.json](../fixtures/behavior/server-only-movement-v1.json) | Channel-2 direction mod throttles (`0D06` Rocket Punch dash) & owner record window (+250 ms tail) | `tests.public.test_behavior_contracts` | Covered in `rust/tests/server_only_movement.rs` |
 | [emote-weapon-selection-v1.json](../fixtures/behavior/emote-weapon-selection-v1.json) | Weapon manager selects an available slot for emotes and keeps the equipped slot on normal branch re-entry | `tests.public.test_behavior_contracts` | Pending Rust coverage |
 | [wheel-spray-pose-v1.json](../fixtures/behavior/wheel-spray-pose-v1.json) | Confirmed spray command pose and eye spring offset across retries and fallback | `tests.public.test_wheel_spray_pose_contract` | Pending Rust coverage |
+| [spawn-sector-v1.json](../fixtures/behavior/spawn-sector-v1.json) | Reconstructed horizontal spawn sector, projected center, zero-axis fallback and independent wall/floor rejection | `tests.public.test_spawn_sector_contract` | Pending Rust coverage |
+
+The spawn sampler starts at the floor below the requested center and interprets its half-angle in the horizontal request frame. A direction with no horizontal component uses +X. Its first angular probe is at the negative edge, which the reconstruction includes when the path is supported and clear. The fixture exercises this geometry directly. The authored script path normalizes the direction and rounds the full degree angle to a float32 half-angle in radians, so an authored 90-degree request and a direct binary64 `pi / 4` request have different numeric boundaries. Retail candidate coordinates remain unverified.
 
 Run the public contract test modules locally without runtime data:
 
