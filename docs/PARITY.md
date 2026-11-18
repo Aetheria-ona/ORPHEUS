@@ -1,0 +1,36 @@
+# Python and Rust gameplay parity for build 104319
+
+Use this matrix to choose the next Soldier: 76 verification session. The Python reference is [`45044d0d`](https://github.com/leafall903/ORPHEUS/tree/45044d0d62399d9eb876c08e788aaea1f56cecc9). The Rust implementation is [`b4f3f849`](https://github.com/leafall903/ORPHEUS/tree/b4f3f849bdad2d2d488178594335d88a9f202bf5). These revisions identify the implementations across the November 19 branch rename.
+
+⬜ means a port is outstanding. 🟨 means partial implementation or insufficient evidence for the full row. 🟩 means a named synthetic contract passed for the indicated behavior. 🟦 requires a matching private replay on the same platform. ⭐ requires original-client acceptance on an identified revision. The goldens column tracks the private **cross-language** comparison. A dash means there is no verified comparison recorded here. Keep the contract result when recording stronger evidence.
+
+| Behavior | Python | Rust | Synthetic contract or test evidence | Golden | Next acceptance |
+| --- | :---: | :---: | --- | :---: | --- |
+| Login, lobby, queue, enter Practice Range and select Soldier | 🟨 | 🟨 | Both have local lobby and game handoff paths. Earlier sessions reached hero selection. | — | Run the whole sequence on the verification tag. #3 |
+| JAM frame boundaries across fragmented reads | 🟩 | 🟩 | [jam-framing-v1](../fixtures/behavior/jam-framing-v1.json) | — | This contract covers stream framing. Lobby admission is tracked separately. |
+| Settings survive save/reload | 🟩 | 🟩 | [profile-settings-v1](../fixtures/behavior/profile-settings-v1.json) | — | Validate persistence independently of hero equip. |
+| Retry a short action until its acknowledgement | 🟩 | 🟩 | [body-short-action-retry-v1](../fixtures/behavior/body-short-action-retry-v1.json) | — | Compare owner/observer delivery during sustained play. |
+| Reliable body create/retire, resend budget and reused IDs | 🟨 | 🟨 | [Python combat-notice tests](../tests/runtime/test_game_bot_notices.py) exercise dropped notices and retirement. | — | Record a matching Rust lifecycle trace. #12 |
+| Server-only movement window and direction modifiers | 🟩 | 🟩 | [server-only-movement-v1](../fixtures/behavior/server-only-movement-v1.json) | — | Verify the separate player prediction path. #4 |
+| World queries for absent entities/fields | 🟩 | 🟩 | [world-queries-v1](../fixtures/behavior/world-queries-v1.json) | — | Check new queries against both hosts. |
+| VM hostile-target filter and total-health expression | 🟩 | 🟩 | [hostile filter](../fixtures/behavior/statescript-hostile-filter-v1.json), [total health](../fixtures/behavior/statescript-health-total-v1.json) | — | Applying these expressions inside an entire stock hero graph needs separate evidence. |
+| Map and team collision, upstairs bot patrol | 🟨 | 🟨 | Python shared mover and Rust collision/ECS/Lua paths have headless coverage. | — | Walk the upstairs route; check walls, friendly passthrough and hostile blocking. #63 |
+| Soldier body, stock rifle model, ammo HUD | 🟨 | 🟨 | Rust has a prepared body/weapon-tree test; long-session identity remains open. | — | Confirm first-person model, initial ammo and HUD after spawn. #3, #72 |
+| Hold fire, release/repress, reload, resume | 🟨 | 🟨 | [Python combat suite](../tests/runtime/test_game_combat.py); Rust has prepared owner-session and retry tests. | — | Compare ammo, cadence, animation and sound through the full sequence. #3, #4 |
+| Sprint start/stop and firing during Sprint | 🟨 | 🟨 | [Python ability suite](../tests/runtime/test_script_abilities.py); Rust prepared long-session test tracked in #72. | — | Check movement, arms animation, fire suppression and the first shot after Sprint. #4 |
+| Helix Rockets flight, impact and damage | 🟨 | 🟨 | Python tests cooldown; Rust has a prepared encrypted-loopback Helix delivery test. | — | Confirm projectile, direct/splash hit, sound, cooldown and ammo display. #3 |
+| Biotic Field deployment, healing and expiry | 🟨 | 🟨 | Python tests throw/cooldown; Rust has a prepared canister and field delivery test. | — | Confirm placement, radius, healing and presentation. #3 |
+| Quick melee, Tactical Visor and ultimate charge | 🟨 | 🟨 | Python tests single-hit melee and the full-charge gate; Rust end-to-end coverage for these actions has yet to be established. | — | Exercise charge, activation, expiry and HUD continuity. #3, #8 |
+| Hitscan, headshot, incoming damage, health, death and respawn | 🟨 | 🟨 | Shared combat paths exist. Headless health arithmetic has narrower scope than client feedback. | — | Check local HP and the response to hits from both directions. #3, #9, #121 |
+| Enemy bot health bar from full health through respawn | 🟨 | 🟨 | Python has bot health/notice ordering tests. | — | Track the same bot through nonlethal damage, kill and return at full health. #7 |
+| Elimination banner, top-right feed and target name | 🟨 | 🟨 | Python bridge tradeoff under review in #99. | — | Check both names while ammo, health and ultimate meters keep updating. #8 |
+| Headshot sound, hit effects, multikill cues and bot voice | 🟨 | 🟨 | Named events and audible playback require separate evidence. | — | Capture per-cue results in the client. #9, #10, #11 |
+| Fall out of the map and respawn exactly once | 🟨 | 🟨 | Original trigger/volume and route remain under investigation. | — | Record takeoff point, route and a nearby valid landing. #13 |
+| Ten hero switches, ten rejoins, ten minutes of Soldier play | 🟨 | 🟨 | Earlier Rust tests include one client crash and one clean exit after 218 seconds of observation on `0a9d2932`. | — | Verify each sequence separately on the same tag. #3, #72, #121 |
+| Two clients observe movement, damage, hero replacement and reconnect | 🟨 | 🟨 | Multiplayer transport and room state have headless tests. | — | Two testers compare owner and observer views on the same revision. |
+| Doomfist and Wrecking Ball ability sets | 🟨 | 🟨 | Individual node and movement contracts exist; full hero acceptance remains open. | — | Verify each hero's damage, movement, presentation and recovery. #5, #6, #36–38, #47 |
+| Cassidy, other heroes and additional maps | 🟨 | 🟨 | Rust has prepared Cassidy/Junkenstein tests; coverage varies by hero and map. | — | Add a row for the concrete behavior, revision and scenario before crediting parity. |
+
+**How to check a row.** For the green rows, run the public Python tests in [the contract guide](BEHAVIOR_CONTRACTS.md) and the Rust workspace tests at the pinned revision. Both trees contained identical fixture bytes for those rows on November 18. The [Python status page](STATE.md) and [Rust prepared-test notes](https://github.com/leafall903/ORPHEUS/blob/b4f3f849bdad2d2d488178594335d88a9f202bf5/docs/STATE.md) describe the narrower headless and historical observations behind the yellow rows.
+
+Record runtime manifest fingerprint, build, revision, scenario and platform for a private golden; publish only a result summary. Record tester, locale, actions, expected behavior and observed result for a client pass. A verification-day report should cover all eight playable scenarios on one tag with two testers. After Python maintenance ends, its archived revision remains the reference for new Rust comparisons.
