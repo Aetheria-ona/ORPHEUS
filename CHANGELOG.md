@@ -6,6 +6,8 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
+- Preserve optional StateScript names and event metadata when preparing a local runtime pack. ORPHEUS-generated JSON tables and manifests now use LF on Windows and Linux. Generated graph bundles omit the host OS, filename and timestamp from their identifying metadata.
+
 - Rotate spawn probes in the request's horizontal frame. Zero-width sectors stay on their axis, and the closed cone, floor and wall checks have a synthetic cross-platform fixture. Retail NPC spawn placement remains unverified.
 - When generating gameplay graphs from local XML, include the selected maps' spawner body definitions, AI associations and placed script roots. On a local 104319 Practice Range pack this gave all 15 training bots their body scripts and delivered their nameplate presenters on first spawn and respawn. Visible overhead health bars still require original-client verification.
 

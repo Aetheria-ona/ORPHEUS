@@ -92,4 +92,4 @@ def prepare_gameplay(
 def _write_table(output: Path, data: dict) -> None:
     if not data:
         raise ValueError(f"DataTool XML did not produce any entries for {output.name}")
-    output.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
