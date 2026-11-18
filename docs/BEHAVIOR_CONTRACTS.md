@@ -27,7 +27,9 @@ ORPHEUS uses small, language-neutral JSON fixtures under `fixtures/behavior/` so
 
 ---
 
-## Contracts on `main` (10 Fixtures)
+## Contracts on `main`
+
+The tables list selected fixtures. The [fixture directory](../fixtures/behavior/) contains the full set. Python also checks shared StateScript behavior in the [VM](../tests/public/test_statescript_vm_contracts.py), [entity](../tests/public/test_statescript_entity_contracts.py) and [combat](../tests/public/test_statescript_combat_contracts.py) contract suites.
 
 ### Public CI Contracts (No Runtime Data Required)
 
@@ -36,17 +38,17 @@ ORPHEUS uses small, language-neutral JSON fixtures under `fixtures/behavior/` so
 | [jam-framing-v1.json](../fixtures/behavior/jam-framing-v1.json) | JAM stream framing encryption/decryption (`00..1f` key, all split boundaries & 1-byte delivery) | `tests.public.test_behavior_contracts` | Covered in CI (`orpheus-wire`) |
 | [world-queries-v1.json](../fixtures/behavior/world-queries-v1.json) | Strict VM World queries (`origin`, `position`, foreign vars, missing/null vs. unavailable host services) | `tests.public.test_world_query_contracts` | Covered in CI (`--test world_queries`) |
 | [profile-settings-v1.json](../fixtures/behavior/profile-settings-v1.json) | Client settings persistence (`22200`–`22204` $\rightarrow$ `+0x130` signed 32-bit keys / 64-bit values $\rightarrow$ `20802`) | `tests.public.test_profile_settings_contracts` | Covered in CI (`--test profile_settings`) |
-| [seismic-slam-wave-v1.json](../fixtures/behavior/seismic-slam-wave-v1.json) | Seismic Slam immediate wave reach sampling, target deduplication & child state delivery | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
-| [seismic-slam-placement-v1.json](../fixtures/behavior/seismic-slam-placement-v1.json) | Seismic Slam airborne selector: idle, miss retains prior point, success publishes before MoveTo | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
-| [body-short-action-retry-v1.json](../fixtures/behavior/body-short-action-retry-v1.json) | Owner & observer short frame-action encoding, retry with original stamp across loss, and ACK retirement | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
-| [server-only-movement-v1.json](../fixtures/behavior/server-only-movement-v1.json) | Channel-2 direction mod throttles (`0D06` Rocket Punch dash) & owner record window (+250 ms tail) | `tests.public.test_behavior_contracts` | Mirrored on `rust`; Rust consumer tracked in #61 |
+| [seismic-slam-wave-v1.json](../fixtures/behavior/seismic-slam-wave-v1.json) | Seismic Slam immediate wave reach sampling, target deduplication & child state delivery | `tests.public.test_behavior_contracts` | Covered in `rust/tests/seismic_slam.rs` |
+| [seismic-slam-placement-v1.json](../fixtures/behavior/seismic-slam-placement-v1.json) | Seismic Slam airborne selector: idle, miss retains prior point, success publishes before MoveTo | `tests.public.test_behavior_contracts` | Covered in `rust/tests/seismic_slam.rs` |
+| [body-short-action-retry-v1.json](../fixtures/behavior/body-short-action-retry-v1.json) | Owner & observer short frame-action encoding, retry with original stamp across loss, and ACK retirement | `tests.public.test_behavior_contracts` | Covered in `rust/tests/body_short_action_retry.rs` |
+| [server-only-movement-v1.json](../fixtures/behavior/server-only-movement-v1.json) | Channel-2 direction mod throttles (`0D06` Rocket Punch dash) & owner record window (+250 ms tail) | `tests.public.test_behavior_contracts` | Covered in `rust/tests/server_only_movement.rs` |
 | [emote-weapon-selection-v1.json](../fixtures/behavior/emote-weapon-selection-v1.json) | Weapon manager selects an available slot for emotes and keeps the equipped slot on normal branch re-entry | `tests.public.test_behavior_contracts` | Pending Rust coverage |
 | [wheel-spray-pose-v1.json](../fixtures/behavior/wheel-spray-pose-v1.json) | Confirmed spray command pose and eye spring offset across retries and fallback | `tests.public.test_wheel_spray_pose_contract` | Pending Rust coverage |
 
-Run all public contracts locally without runtime data:
+Run the public contract test modules locally without runtime data:
 
 ```powershell
-python -S -B -m unittest tests.public.test_behavior_contracts tests.public.test_world_query_contracts tests.public.test_profile_settings_contracts -v
+python -B -m unittest discover -s tests/public -p "*contract*.py" -v
 ```
 
 ### Runtime-Backed Contracts (Require Local 104319 Runtime Pack)

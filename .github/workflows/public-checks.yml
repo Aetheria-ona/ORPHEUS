@@ -2,7 +2,7 @@ name: Public source checks
 
 on:
   push:
-    branches: [main, leafall]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
