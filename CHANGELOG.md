@@ -6,7 +6,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
-- Announce the November 19 transition from Python to Rust on the default branch and document the maintenance policy for the read-only Python archive.
+- Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
 
 - Clarify which branch to use for Python playtests and Rust migration. The status and contract guides now link the completed cross-language coverage work and distinguish earlier client observations from the next playtest.
 

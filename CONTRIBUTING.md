@@ -2,7 +2,7 @@
 
 Community contributions are welcome across code, protocol research, documentation, and original-client testing. Check [docs/ROADMAP.md](docs/ROADMAP.md) and [open issues](https://github.com/leafall903/ORPHEUS/issues) to find an item whose prerequisites match what you have locally.
 
-**Branch cutover on November 19, 2026 at 12:00 UTC (14:00 Helsinki).** Until then, use the targets below. After the cutover, submit development PRs to Rust `main`. Python's `python-archive` is read-only and closed to new contributions. [Maintainer checklist and clone instructions](docs/BRANCH_TRANSITION.md).
+GitHub is scheduled to open new pull requests against `rust` by default from November 19, 2026 at 12:00 UTC. When submitting Python work, choose `main` in the **base** selector. Both branches accept normal pull requests. [Default branch change](docs/BRANCH_TRANSITION.md).
 
 - **`main`:** Python server, Windows launcher, data extraction tools, and shared behavior tests.
 - **`rust`:** Native Rust server ([Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust)).

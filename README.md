@@ -1,13 +1,13 @@
 # ORPHEUS
 
-[简体中文](README.zh-CN.md) · [Discord](https://discord.gg/tqukqjAk7) · [Rust branch transition](docs/BRANCH_TRANSITION.md)
+[简体中文](README.zh-CN.md) · [Discord](https://discord.gg/tqukqjAk7) · [Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust)
 
 ORPHEUS is an open-source server reimplementation for **Overwatch 1 (retail build 1.74.0.0.104319)** focused on research and preservation.
 
-**Scheduled branch change · Thursday, November 19, 2026 at 12:00 UTC (14:00 Helsinki).** The Python `main` becomes the read-only `python-archive`, and the Rust `rust` branch becomes the default `main`. Until then, Python PRs target the current `main`. After the switch, Python maintenance ends and the archive accepts no new PRs. Rust is still a developer preview. [Cutover details and instructions for existing clones](docs/BRANCH_TRANSITION.md).
+**GitHub is scheduled to make `rust` the default branch on November 19, 2026 at 12:00 UTC (14:00 Helsinki).** Python development and pull requests continue on `main`. Rust development and pull requests continue on `rust`. [Default branch change](docs/BRANCH_TRANSITION.md).
 
-- **Python (this checkout)** contains the reference server. Start here for Practice Range playtests, the Windows launcher, runtime preparation and Python tests. The first playable milestone is still in development.
-- **Rust** contains the experimental native dedicated server. Gameplay verified on the original client with Python is the reference for migration to Rust.
+- **`main` (this branch)** contains the Python reference server. Start here for Practice Range playtests, the Windows launcher, runtime preparation and Python tests. The first playable milestone is still in development.
+- **`rust`** contains the experimental native dedicated server. Gameplay verified on the original client with Python is the reference for migration to Rust.
 
 [Quick Start (Local Practice Range)](#local-practice-range-single-player-testing) · [Join a Server](#join-a-server) · [Current Status](#current-status) · [Contributing](CONTRIBUTING.md) · [Open Issues](https://github.com/leafall903/ORPHEUS/issues)
 
