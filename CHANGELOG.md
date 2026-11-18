@@ -15,6 +15,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Check the gallery NPC additions in the login and live hero catalogs while preserving the historical message digests and ordering for all five lobby profiles.
 - Restore prepared Deadeye aim and cleanup checks by verifying the registered effect instance. Exercise objective messages on the listener attached by body startup. The checks detect an effect left alive after target exit and duplicate objective delivery.
 - Verify both Sprint movement modifiers and their operands across runtime packs that serialize the same object fields in different orders.
+- Verify Doomfist's recorded jump and Slam commands on a ledge and above continuous ground. Replay checks the movement sample and the ability phase selected by each terrain.
 - Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
 - Add a tag-specific verification form and a revision-pinned Soldier parity matrix. Record the kill-feed and combat HUD observations separately in the Python status notes.
 

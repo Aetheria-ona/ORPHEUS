@@ -10,44 +10,54 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_server_journal as journal_tests
 
+from ow174.game.collision import World
 from ow174.game.commands import JUMP
 from ow174.game.content import SOLDIER
 from ow174.game.script import graph, nodes
 from ow174.game.server_journal import _ReplaySession
 from tests.runtime.test_game_graph_analysis import make_graph, node, output
+from tests.runtime.test_game_mover import box
 
 
 class MoveToReplayTests(unittest.TestCase):
     def test_doomfist_airborne_slam_replays_owner_movement_sample(self):
         doomfist = 0x02E000000000012F
         fixture = journal_tests.ServerJournalTests()
-        session, sent = fixture.make(verify_stored_state=True)
-        (peer,), (player,) = fixture.connected(session, sent, two=False)
-        peer.message(21616, journal_tests.pick(player.entity, doomfist), now=101.0)
-        first = player.body_script.frame + 1
-        peer.commands(first, 1, JUMP, now=101.016)
-        peer.commands(first + 1, 1, 0x10, now=101.032)  # E / Ability 2
 
-        def observe(player):
+        def observe(player, selected_state):
             component = player.body_script.component
             common = next(inst for inst in component.instances.values() if inst.graph.index == 0x01C7)
             slam = next(inst for inst in component.instances.values() if inst.graph.index == 0x0B27)
+            self.assertIn(selected_state, slam.states)
             return (
                 player.hero.guid,
                 common.states[4].sample,
                 component.entity_var(417, create=False).value(),
-                slam.states[6].active,
+                slam.vars[59].value(),
+                slam.states[selected_state].active,
                 bool(slam.states[0].flags & nodes.Ability.RUNNING),
             )
 
-        # The pose is airborne, rising, moving, and started with a jump.
-        expected = (doomfist, 0x815, True, True, True)
-        self.assertEqual(observe(player), expected)
-        replay = _ReplaySession(session.finish(), session.registry.resolve)
-        result = replay.run()
-        self.assertTrue(result["stored_state_verified"])
-        (replayed,) = replay.server.matches[0].players
-        self.assertEqual(observe(replayed), expected)
+        # Both jumps are rising with forward throttle. Only the short platform lets the player clear its edge.
+        for edge, phase, selected_state in ((0.1, 2, 6), (5.0, 1, 1)):
+            with self.subTest(platform_end=edge):
+                world = World(box(-4, 4, -1, 0, -5, edge) + box(-30, 30, -7, -6, -30, 30))
+                # The airborne case also verifies the registered server snapshot at each recorded step.
+                verify_snapshot = phase == 2
+                session, sent = fixture.make(world=world, verify_stored_state=verify_snapshot)
+                (peer,), (player,) = fixture.connected(session, sent, two=False)
+                peer.message(21616, journal_tests.pick(player.entity, doomfist), now=101.0)
+                first = player.body_script.frame + 1
+                peer.commands(first, 1, JUMP, forward=127, now=101.016)
+                peer.commands(first + 1, 7, 0, forward=127, now=101.128)
+                peer.commands(first + 8, 1, 0x10, forward=127, now=101.144)  # E / Ability 2
+
+                expected = (doomfist, 0x835, True, phase, True, True)
+                self.assertEqual(observe(player, selected_state), expected)
+                replay = _ReplaySession(session.finish(), session.registry.resolve)
+                self.assertEqual(replay.run()["stored_state_verified"], verify_snapshot)
+                (replayed,) = replay.server.matches[0].players
+                self.assertEqual(observe(replayed, selected_state), expected)
 
     def test_fixed_world_move_replays_active_state_and_arrival(self):
         shift = 0x08  # Command bit for logical button 35.
