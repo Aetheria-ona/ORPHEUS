@@ -1,6 +1,7 @@
 # Restoration Roadmap
 
 Target build: **Overwatch 1 retail 1.74.0.0.104319**.
+See [Python and Rust gameplay parity](PARITY.md) for per-behavior evidence and the next Soldier verification scenarios.
 For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHANGELOG.md). For active tasks see [GitHub Issues](https://github.com/leafall903/ORPHEUS/issues).
 
 ---
