@@ -109,7 +109,7 @@ class EscortObjectivePlaceablesContractTests(unittest.TestCase):
             encode.assert_not_called()
             match._spawn_steps(player, client, 31.0)
         encode.assert_called_once_with(
-            {expected["countdown_var"]: expected["seconds"]}, mode, map_guid, waiting=False,
+            {expected["countdown_var"]: expected["seconds"]}, mode, map_guid, phase_state=None,
         )
         client.queue_mode_frame.assert_called_once_with(encode.return_value)
         self.assertEqual(player.select_open, expected["select_open_with_hero"])

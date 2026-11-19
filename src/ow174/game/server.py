@@ -600,6 +600,11 @@ class Client:
               and not stream.data_last):
             stage = next(i for i, (_, checkpoint) in enumerate(escort.checkpoints) if checkpoint == entity)
             self.queue_entities([stream.full_frame(escort.checkpoint_frame(stage))])
+        elif escort is not None and entity in escort.doors:
+            self.player.escort_door_scripts.setdefault(entity, Stream(entity))
+        elif (escort is not None and entity in self.player.escort_room_visuals
+              and (frame := escort.room_visual_frame(entity, self.player.team)) is not None):
+            self.queue_entities([Stream(entity).full_frame(frame)])
         if entity == self.player.entity and not self._own_controller_acked:
             self._own_controller_acked = True
             possession = self._pending_possessions.get(entity)
@@ -769,14 +774,19 @@ class Client:
                         if getattr(self.player, "escort_mode_state", None) is not None:
                             self.player.mode_script.data_last = 0
                             self.player.escort_mode_state = None
+                            self.player.escort_hud_bound = False
                         if not alive:
                             self._pending_mode_frame = None
                     elif escort is not None and item.entity == escort.payload:
                         self.player.escort_payload_ready = False
                         self.player.escort_payload_script = Stream(escort.payload)
-                        self.player.escort_payload_animation = None
+                        self.player.escort_payload_state = None
+                        self.player.escort_hud_bound = False
                     elif escort is not None and item.entity in self.player.escort_checkpoint_scripts:
                         self.player.escort_checkpoint_scripts[item.entity] = Stream(item.entity)
+                    elif escort is not None and item.entity in escort.doors:
+                        self.player.escort_door_scripts.pop(item.entity, None)
+                        self.player.escort_door_states.pop(item.entity, None)
                     self._pending_possessions.pop(item.entity, None)
                     old = self._confirmed_possessions.pop(item.entity, None)
                     if old is not None:

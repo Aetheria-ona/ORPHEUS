@@ -12,7 +12,8 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Enable in-match lobby controls for renames, team and spectator changes, next-match settings, return and restart. Honor the immediate, full-room and manual start policies. Keep the native waiting and assembly prompts, support confirming and changing heroes during assembly, and reset the old hero and pick on team change. Preserve the localized loading and first-round objective titles.
 - Show the player's localized communication-wheel chat on their controller in Deathmatch and Bounty Hunter.
 - Run a single Escort round with setup, cart movement and collision, checkpoint progress, overtime and results. Load Escort objectives, health-pack placements and eligible scenery using catalogs generated from local 104319 data.
-- Escort's normal match flow is still being restored. Heroes other than Soldier: 76 temporarily cannot leave the spawn room in this mode. Door timing and collision, health-pack pickup, multi-round play and stored-state Escort replay remain open.
+- Fix Escort spawn-room logic. Select respawns using the current checkpoint and update doors, collision, and team-specific barriers as the round advances. Keep players supported by the moving payload and synchronize its segment and overall progress to the client.
+- The original client receives payload progress, but the Escort progress bar still does not render. Health-pack pickup, multi-round play and stored-state Escort replay remain open.
 - The original client verified basic private room and map loading, team and spectator transitions, in-match room controls, and returning and restarting. Remaining checks include Escort presentation and gates, preset subtitles, assembly prompts, free-for-all chat styling, and multi-client spectating. Shared rooms and Workshop execution remain open.
 
 ### 2026-11-18

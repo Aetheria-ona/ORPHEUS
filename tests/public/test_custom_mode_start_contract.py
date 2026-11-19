@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from ow174.game.match import Match
 from ow174.lobby.custom_games import START_GAME, CustomRoom, start_room
 
 FIXTURES = Path(os.environ.get("ORPHEUS_BEHAVIOR_FIXTURES") or Path(__file__).resolve().parents[2]
@@ -48,3 +49,19 @@ class CustomModeStartContractTests(unittest.TestCase):
         game.take_out.assert_not_called()
         self.assertEqual(room.match_id, (101, 102))
         self.assertIsNone(room.leaving_action)
+
+    def test_room_owner_can_override_either_waiting_policy_once(self):
+        for choice in (None, *self.input["choices"].values()):
+            with self.subTest(choice=choice):
+                match = Match.__new__(Match)
+                match.game_map = SimpleNamespace(custom_start=choice)
+                match.assemble_ends = None
+
+                def begin(now, target=match):
+                    target.assemble_ends = now + self.expected["assembly_seconds"]
+
+                match._begin_assembly = Mock(side_effect=begin)
+                allowed = choice in self.expected["manual_override_while_waiting"]
+                self.assertEqual(match.start_custom_mode(1), allowed)
+                self.assertFalse(match.start_custom_mode(2))
+                self.assertEqual(match._begin_assembly.call_count, int(allowed))

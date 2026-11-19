@@ -8,7 +8,7 @@ Inputs (all from an Overwatch 1.74 install through DataTool, OWLib):
 
     py tools/extract_game_maps.py --stu <dump> --raw <raw> --ents <ents>
 
-Pass --models with the local raw 00C cart models to add payload collision to the runtime catalog.
+Pass --models with the local raw 00C models to add cart and spawn-room collision.
 
 Rules, from the client (image base 0x7FF788F10000):
 - Map placeables get one flat index over the placeable types whose flag is set in the type table
@@ -50,6 +50,11 @@ FFA_TAG = 0x413
 OBJECTIVE_GRAPH = 0xF4C  # the objective graph that holds the spawn tags of assault/escort/hybrid
 POINT_GRAPH = 0xE8E  # capture point graph (its var 0x1DDB is the point name)
 PAYLOAD_GRAPH = 0x1225  # the payload's own graph
+ROOM_BARRIER_GRAPH = 0x0FA8
+ROOM_VISIBILITY_GRAPH = 0x0D73
+SPAWN_DOOR_GRAPH = 0x0D32
+ROOM_BARRIER_TEAMS = {0x1C90: 0, 0x1C91: 1}  # the mover categories of models 09A0 and 099D
+ESCORT_GATE_STAGES = {0x4BB: 1, 0x4BC: 2}
 PARAMETRIC_INSTANCE = 0xE42D9464
 TARGET_TAG_INSTANCE = 0xB1B9C667
 RAIL_POINT_DEFINITIONS = {0x0400000000000122, 0x0400000000002041, 0x0400000000002042}
@@ -221,16 +226,81 @@ def escort_scene_placeables(base: int, entities: list, mirrored: list, allowed, 
 
 
 def escort_payload_shapes(entity: dict, models: dict, model_path: Path) -> list:
+    model = models.get(entity["definition"] & 0xFFFFFFFF)
+    if not (shapes := escort_model_shapes(model, model_path)):
+        raise ValueError(f"Escort cart model {model!r} has no available mover shapes")
+    return shapes
+
+
+def escort_model_shapes(model: int | None, model_path: Path) -> list:
     from ow174.game import props
 
-    model = models.get(entity["definition"] & 0xFFFFFFFF)
     if model is None:
-        raise ValueError("Escort cart has no root model in the definition dump")
+        return []
     for name in (f"{model:012X}.00C", f"{guid(model, 0xC):016X}.bin"):
         path = model_path / name
-        if path.is_file() and (shapes := props.model_shapes(path.read_bytes())):
-            return shapes
-    raise ValueError(f"Escort cart model {model:012X}.00C has no available mover shapes")
+        if path.is_file():
+            return props.model_shapes(path.read_bytes())
+    return []
+
+
+def escort_rooms(base, entities, candidates, objectives, *, models=None, model_path=None):
+    """Associate room props with the exact target tags on the authored checkpoint."""
+    rooms = {}
+    for objective in objectives:
+        if objective["kind"] == "checkpoint":
+            for team, field in enumerate(("defense_tag", "attack_tag")):
+                if tag := objective.get(field):
+                    rooms.setdefault(int(tag, 16) & 0xFFFFFFFF, []).append((objective["objective"], team))
+
+    placements, hidden, collision_models = [], set(), {}
+    for index, tags, graphs in candidates:
+        pairs = sorted({room for tag in tags for room in rooms.get(tag, ())})
+        entity = entities[index - base]
+        definition = entity["definition"] & 0xFFFFFFFF
+        viewer = ROOM_BARRIER_TEAMS.get(definition)
+        if ROOM_VISIBILITY_GRAPH in graphs and pairs:
+            hidden.add(index)
+            flags = graphs[ROOM_VISIBILITY_GRAPH]
+            enabled = {key for key, value in flags.items() if str(value).lower() in ("1", "true")}
+            if enabled & {0x877, 0x878, 0x2A12, 0x2A13}:
+                # 0D73 maps its role flags to the opposing team's visibility mask.
+                viewers = [team for team, flags in enumerate(({0x877, 0x2A13}, {0x878, 0x2A12}))
+                           if not enabled & flags]
+                if viewers:
+                    placements.append(
+                        {"placeable": index, "rooms": pairs, "kind": "overlay", "viewers": viewers},
+                    )
+            continue
+        if ROOM_BARRIER_GRAPH in graphs and viewer is not None and pairs:
+            hidden.add(index)
+            pairs = [(stage, team) for stage, team in pairs if team != viewer]
+            kind = "barrier"
+        elif SPAWN_DOOR_GRAPH in graphs:
+            pairs = [(stage, team) for stage, team in pairs if team == 1]
+            kind = "door"
+            if not pairs:
+                pairs = sorted({(ESCORT_GATE_STAGES[tag], 1) for tag in tags if tag in ESCORT_GATE_STAGES})
+                kind = "checkpoint_gate"
+        else:
+            continue
+        if not pairs:
+            continue
+        placement = {"placeable": index, "rooms": pairs, "kind": kind}
+        if kind in ("door", "checkpoint_gate"):
+            overrides = graphs[SPAWN_DOOR_GRAPH]
+            for key, field in ((0x07F0, "open_seconds"), (0x07F3, "close_seconds"), (0x09CB, "open_delay")):
+                if overrides.get(key) is not None:
+                    placement[field] = float(overrides[key])
+        if model_path is not None and (model := (models or {}).get(definition)) is not None:
+            if model not in collision_models:
+                collision_models[model] = escort_model_shapes(model, model_path)
+            if collision_models[model]:
+                placement.update(model=model, position=[f32(v) for v in entity["position"]],
+                                 scale=[f32(v) for v in entity["scale"]],
+                                 rotation=[f32(v) for v in entity["rotation"]])
+        placements.append(placement)
+    return placements, hidden, {str(model): shapes for model, shapes in collision_models.items() if shapes}
 
 
 def modes(stu: Path) -> dict:
@@ -325,7 +395,7 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict, *
     if len(stus) != len(entities):
         raise SystemExit(f"map {index:X}: {len(entities)} entities but {len(stus)} in the DataTool dump")
     placeables, identifiers, mirrored, spawns, objectives = [], {}, [], [], []
-    health_packs = []
+    health_packs, room_candidates = [], []
     defense_tags, attack_tags = {}, {}
     for number, (entity, data) in enumerate(zip(entities, stus, strict=True)):
         flat = base + number
@@ -377,6 +447,8 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict, *
         if not found & {SPAWN, REQUIRED}:
             if entity["client_id"] == 0:
                 mirrored.append(flat)
+                if graphs.keys() & {ROOM_BARRIER_GRAPH, ROOM_VISIBILITY_GRAPH, SPAWN_DOOR_GRAPH}:
+                    room_candidates.append((flat, target_tags(data), graphs))
                 size = HEALTH_PACK_DEFINITIONS.get(entity["definition"])
                 # Placements with an identifier need a separate mode-specific selection rule.
                 if size is not None and not entity["identifier"]:
@@ -440,9 +512,21 @@ def build_map(header: dict, raw: Path, ents: Path, defs: dict, mode_ids: dict, *
         "health_packs": health_packs,
     }
     if ESCORT_MODE in header["modes"]:
-        entry["escort_scene_placeables"] = escort_scene_placeables(
-            base, entities, mirrored, set(mode_ids.get(ESCORT_MODE, ())), defs,
+        allowed = set(mode_ids.get(ESCORT_MODE, ()))
+        room_placements, hidden, room_models = escort_rooms(
+            base, entities, [row for row in room_candidates
+                             if (not entities[row[0] - base]["identifier"]
+                                 or entities[row[0] - base]["identifier"] in allowed)],
+            objectives, models=models, model_path=model_path,
         )
+        entry["escort_scene_placeables"] = [
+            index for index in escort_scene_placeables(base, entities, mirrored, allowed, defs)
+            if index not in hidden
+        ]
+        if room_placements:
+            entry["escort_room_placeables"] = room_placements
+        if room_models:
+            entry["escort_room_models"] = room_models
         if (rail := escort_rail(base, entities, objectives)) is not None:
             entry["escort_rail"] = rail
             if model_path is not None:
@@ -470,7 +554,7 @@ def dump(maps: dict) -> str:
         fields = list(entry.items())
         for i, (field, value) in enumerate(fields):
             end = "," if i < len(fields) - 1 else ""
-            if field in ("spawns", "objectives", "health_packs") and value:
+            if field in ("spawns", "objectives", "health_packs", "escort_room_placeables") and value:
                 items = [f"   {json.dumps(v, ensure_ascii=False)}" for v in value]
                 lines.append(f"  {json.dumps(field)}: [")
                 lines.append(",\n".join(items))
@@ -487,7 +571,7 @@ def main() -> None:
     parser.add_argument("--stu", type=Path, required=True, help="STU dump with 003, 09F and 0C5 as XML")
     parser.add_argument("--raw", type=Path, required=True, help="folder that holds the raw 0BC map chunks")
     parser.add_argument("--ents", type=Path, required=True, help="dump-map-entities output folder")
-    parser.add_argument("--models", type=Path, help="raw cart 00C models, to include mover collision")
+    parser.add_argument("--models", type=Path, help="raw 00C cart and room models for mover collision")
     args = parser.parse_args()
     raw = args.raw / "0BC" if (args.raw / "0BC").is_dir() else args.raw
     defs, models = components(args.stu)

@@ -276,12 +276,16 @@ class Player:
         self.script = Stream(self.entity)  # the player entity's statescript: the controller
         self.mode_script = Stream(GAME_MODE_ENTITY)  # the game mode entity's variables: the countdown
         self.escort_mode_state: escort.ModeState | None = None
+        self.escort_hud_bound = False
         self.escort_payload_ready = False
         self.escort_payload_script = Stream(match.escort.payload) if match.escort is not None else None
-        self.escort_payload_animation: int | None = None
+        self.escort_payload_state: escort.PayloadState | None = None
         self.escort_checkpoint_scripts = (
             {entity: Stream(entity) for _, entity in match.escort.checkpoints} if match.escort else {}
         )
+        self.escort_room_visuals: frozenset[int] = frozenset()
+        self.escort_door_scripts: dict[int, Stream] = {}
+        self.escort_door_states: dict[int, escort.DoorState] = {}
         self.next_countdown = 0.0
         self.select_open = team != SPECTATOR_TEAM
         self.assembly_pick_confirmed = False
@@ -717,14 +721,19 @@ class Match:
     def placeable_ids(self) -> list[int]:
         return [0x80000000 | index for index in self.game_map.placeables]
 
+    @staticmethod
+    def _placeable_create(entity: int) -> EntityUpdate:
+        index = entity & 0x7FFFFFFF
+        return EntityUpdate(entity, OP_CREATE, lambda origin: world.create_placeable(origin, index))
+
     def spawn_updates(self, viewer: Player) -> list[EntityUpdate]:
         """The frame that ends the loading screen: the placeables, the viewer's player (and body, if it
         has one), the game mode entity, the training bots, and the bodies of the players already in the
         world."""
-        updates = [
-            EntityUpdate(entity, OP_CREATE, lambda origin, index=index: world.create_placeable(origin, index))
-            for entity, index in zip(self.placeable_ids(), self.game_map.placeables, strict=True)
-        ]
+        updates = [self._placeable_create(entity) for entity in self.placeable_ids()]
+        if self.escort is not None:
+            viewer.escort_room_visuals = self.escort.room_visuals(viewer.team)
+            updates.extend(self._placeable_create(entity) for entity in sorted(viewer.escort_room_visuals))
         if viewer.has_body:
             updates += self.own_body_updates(viewer)
         updates.append(
@@ -1223,7 +1232,7 @@ class Match:
             self._begin_assembly(now)
 
     def start_custom_mode(self, now: float) -> bool:
-        if self.game_map.custom_start != START_MANUALLY or not self.in_custom_warmup:
+        if not self.in_custom_warmup:
             return False
         self._begin_assembly(now)
         return True
@@ -1242,8 +1251,10 @@ class Match:
         """The seconds left, as the game mode entity's v1303. The client shows them rounded up."""
         player.next_countdown = now + COUNTDOWN_EVERY
         seconds = max(0.0, self.assemble_ends - now)
+        custom_assembly = self.assembling() and self.game_map.custom_start is not None
         frame = combat.mode_frame(
             {COUNTDOWN: float(seconds)}, self.game_map.mode_guid, self.game_map.map_guid,
+            phase_state=combat.ASSEMBLE_HEROES_STATE if custom_assembly else None,
         )
         player.client.queue_mode_frame(frame)
 
@@ -1268,17 +1279,28 @@ class Match:
     def _update_escort(self, now: float) -> None:
         mode = self.escort
         phase, stage = mode.phase, mode.stage
-        previous_shapes = mode.payload_collision.shapes if mode.payload_collision is not None else ()
-        mode.advance(now, ((p.team, p.mover.position) for p in self.players
-                          if p.spawned and p.has_body and p.client is not None
-                          and p.client.leaving_since is None and not self.combat.is_dead(p)))
-        if previous_shapes and mode.payload_collision.shapes is not previous_shapes:
-            old = set(previous_shapes)
+        geometry = mode.payload_collision
+        previous_cart = geometry.shapes if geometry is not None else ()
+        previous_rooms = geometry.room_shapes if geometry is not None else ()
+        living = [
+            p for p in self.players if p.spawned and p.has_body and p.client is not None
+            and p.client.leaving_since is None and not self.combat.is_dead(p)
+        ]
+        riders = [
+            (p, local) for p in living if (local := geometry.rider(p.mover)) is not None
+        ] if previous_cart and phase == escort.Phase.ACTIVE else []
+        mode.advance(now, ((p.team, p.mover.position) for p in living))
+        if geometry is not None and (previous_cart is not geometry.shapes
+                                     or previous_rooms is not geometry.room_shapes):
+            old = set(previous_cart + previous_rooms) - set(geometry.shapes + geometry.room_shapes)
             for player in self.players:
                 body = player.mover.body
                 if body is not None:
                     body.contacts[:] = [contact for contact in body.contacts if contact.shape not in old]
                     body.moved = True
+        if geometry is not None and previous_cart is not geometry.shapes:
+            for player, local in riders:
+                geometry.carry(player.mover, local, RETAIL_QUANTA / 1e6)
         if mode.phase != phase:
             if mode.winner is not None:
                 log.info("[game] %s: escort complete, team %d wins", self.label(), mode.winner + 1)
@@ -1296,20 +1318,54 @@ class Match:
     def _send_escort(self, player: Player, now: float) -> None:
         client = player.client
         mode = self.escort
+        visuals = mode.room_visuals(player.team)
+        if visuals != player.escort_room_visuals:
+            expired = sorted(player.escort_room_visuals - visuals)
+            activated = sorted(visuals - player.escort_room_visuals)
+            updates = [EntityUpdate(entity, OP_DESTROY) for entity in expired]
+            updates.extend(self._placeable_create(entity) for entity in activated)
+            client.queue_entities(updates)
+            player.escort_room_visuals = visuals
+        for entity, door in player.escort_door_scripts.items():
+            if door.data_in_flight:
+                continue
+            previous_door = player.escort_door_states.get(entity)
+            state = mode.door_state(entity, now, previous_door)
+            if (state != previous_door
+                    and (frame := mode.door_frame(entity, state, previous_door)) is not None):
+                first_pose = previous_door is None
+                records = door.reliable_frames(frame, 4096, full=first_pose)
+                if first_pose:
+                    records[-1].movement = mode.door_movement(entity)
+                client.queue_entities(records)
+                player.escort_door_states[entity] = state
         script = player.escort_payload_script
-        if (player.escort_payload_ready and not script.data_in_flight
-                and mode.animation != player.escort_payload_animation
-                and (frame := mode.payload_frame()) is not None):
-            client.queue_entities([script.full_frame(frame)])
-            player.escort_payload_animation = mode.animation
+        previous_payload = player.escort_payload_state
+        payload = mode.payload_state()
+        cart_phase_delivered = (previous_payload is not None and previous_payload.active == payload.active
+                                and not script.data_in_flight)
+        if (player.escort_payload_ready and not script.data_in_flight and payload != previous_payload
+                and (frame := payload.frame(previous_payload)) is not None):
+            client.queue_entities(script.reliable_frames(frame, 4096, full=previous_payload is None))
+            player.escort_payload_state = payload
         if (not client.scene_mode_writable or not player.escort_payload_ready
+                or (player.escort_payload_state is not None and not script.delivered)
                 or not all(stream.delivered for stream in player.escort_checkpoint_scripts.values())):
             return
         previous = player.escort_mode_state
-        state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered))
-        if state != previous:
-            client.queue_scene_mode_frame(state.frame(previous), full=previous is None)
+        state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered),
+                                viewer_team=player.team)
+        # Register the native progress bindings after the active mode and cart
+        # baselines have arrived, including for a viewer joining mid-round.
+        bind_cart = (previous is not None and cart_phase_delivered and escort.HUD_PAYLOAD in previous.states
+                     and escort.HUD_PAYLOAD in state.states and not player.escort_hud_bound)
+        if state != previous or bind_cart:
+            stamp = player.mode_script.last + 1 if bind_cart else None
+            cmfd = max(1, self.tick) if bind_cart else None
+            client.queue_scene_mode_frame(state.frame(previous, cart_changed=stamp, progress_cmfd=cmfd),
+                                          full=previous is None)
             player.escort_mode_state = state
+            player.escort_hud_bound |= bind_cart
 
     # --- the player's statescript --------------------------------------------------------------
 

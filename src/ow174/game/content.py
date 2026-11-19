@@ -14,6 +14,9 @@ MAPS_PATH = DATA_DIR / "game_maps_174.json"  # tools/extract_game_maps.py
 SOLDIER = 0x02E000000000006E
 PRACTICE_RANGE_MODE = 0x0230000000000018
 ESCORT_MODE = 0x0230000000000015
+ATTACK_DEFEND_MODES = {0x0230000000000014, ESCORT_MODE, 0x0230000000000016}
+# 104319 lobby team descriptions (C473/C474.07C) and 0F4A's initial team assignment.
+FIRST_DEFENDING_TEAM, FIRST_ATTACKING_TEAM = 0, 1
 TEAM_DEATHMATCH_MODE = 0x023000000000001D
 TUTORIAL_MODE = 0x0230000000000019
 TUTORIAL_MAP = 0x0800000000000661
@@ -82,6 +85,22 @@ class EscortRailPoint:
 
 
 @dataclass(frozen=True)
+class EscortRoomPlacement:
+    index: int
+    rooms: tuple[tuple[int, int], ...]  # (checkpoint stage, room owner's team)
+    door: bool
+    collision: tuple = ()
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    viewers: tuple[int, ...] = ()  # prop with a viewer-specific visual overlay and no collision
+    open_seconds: float = 2.0  # 0D32 schema default for 07F0
+    close_seconds: float = 2.0  # 0D32 schema default for 07F3
+    open_delay: float = 0.0  # 0D32 waits on 09CB before playing the opening clip
+    has_transform: bool = True  # older local catalogs could omit the authored pose
+
+
+@dataclass(frozen=True)
 class EscortMap:
     payload: int
     rail: tuple[EscortRailPoint, ...]
@@ -89,6 +108,9 @@ class EscortMap:
     stage_seconds: tuple[float, ...]
     payload_collision: tuple = ()
     payload_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    room_placeables: tuple[EscortRoomPlacement, ...] = ()
+    payload_origin: tuple[float, float, float] | None = None
+    payload_rotation: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -267,8 +289,24 @@ def _escort_map(entry: dict, placeables: list[int]) -> EscortMap | None:
         for goal in goals[1:]
     )
     cart = carts[0]
+    room_models = entry.get("escort_room_models", {})
+    room_placeables = tuple(
+        EscortRoomPlacement(
+            p["placeable"], tuple(tuple(room) for room in p["rooms"]),
+            p["kind"] in ("door", "checkpoint_gate"),
+            tuple(room_models.get(str(p.get("model")), ())), tuple(p.get("position", (0, 0, 0))),
+            tuple(p.get("rotation", (0, 0, 0, 1))), tuple(p.get("scale", (1, 1, 1))),
+            tuple(p.get("viewers", ())),
+            float(p.get("open_seconds", 2.0)), float(p.get("close_seconds", 2.0)),
+            float(p.get("open_delay", 0.0)),
+            has_transform="position" in p and "rotation" in p,
+        )
+        for p in entry.get("escort_room_placeables", ())
+    )
     return EscortMap(cart["placeable"], points, later_spawns, stage_seconds,
-                     tuple(cart.get("collision", ())), tuple(cart.get("scale", (1.0, 1.0, 1.0))))
+                     tuple(cart.get("collision", ())), tuple(cart.get("scale", (1.0, 1.0, 1.0))),
+                     room_placeables, tuple(cart["position"]) if "position" in cart else None,
+                     tuple(cart["rotation"]) if "rotation" in cart else None)
 
 
 def game_map(

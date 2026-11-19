@@ -97,8 +97,9 @@ FIELDS = {
     Player: _names("match slot account_lo name rank role card card_sent card_again hero team quanta entity "
                    "body has_body skin client gone loaded_at steps_done spawned spawn mover commands "
                    "body_script body_script_failed seen shown script mode_script escort_mode_state "
-                   "escort_payload_ready escort_payload_script escort_payload_animation "
-                   "escort_checkpoint_scripts next_countdown "
+                   "escort_hud_bound escort_payload_ready escort_payload_script escort_payload_state "
+                   "escort_checkpoint_scripts escort_room_visuals escort_door_scripts escort_door_states "
+                   "next_countdown "
                    "select_open assembly_pick_confirmed controller_hero "
                    "stats stats_sent next_stats"),
     ShownController: _names("script create_acked pick card_again possession"),
@@ -147,8 +148,8 @@ FIELDS = {
     ),
     BitWriter: _names("value count"),
     world.RecordWriter: _names("value count origin"),
-    world.Movement: _names("position yaw pitch velocity flags throttles input_frame input_throttles "
-                           "air_ticks gravity frame crouch_frame spring spring_speed fall"),
+    world.Movement: _names("position yaw pitch body_pitch velocity flags throttles input_frame "
+                           "input_throttles air_ticks gravity frame crouch_frame spring spring_speed fall"),
     bots.Bot: _names(
         "entity spawner hero_data hints dead body_script records_from hero name body team health speed accel "
         "brake pace direction position yaw velocity firing route index wait target start keys turning held "

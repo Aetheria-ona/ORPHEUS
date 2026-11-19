@@ -155,7 +155,8 @@ def wire_frame(packet):
             length = reader.bits(12)
             assert not reader.bit()  # reference movement record
             movement = read_movement(reader, tick)
-            update.movement = world.Movement(movement["position"], movement["yaw"], movement["pitch"])
+            update.movement = world.Movement(movement["position"], movement["yaw"], movement["pitch"],
+                                             body_pitch=movement["body_pitch"])
             assert reader.pos == start + length
         if not reader.bit():
             records.append((update, {}))

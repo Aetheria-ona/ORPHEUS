@@ -24,7 +24,14 @@ More of the screen (read in the graphs and the client):
 from dataclasses import dataclass, replace
 
 from ow174.game.bits import BitWriter
-from ow174.game.content import PRACTICE_RANGE_MODE, SOLDIER, TUTORIAL_MODE, heroes
+from ow174.game.content import (
+    ATTACK_DEFEND_MODES,
+    FIRST_ATTACKING_TEAM,
+    PRACTICE_RANGE_MODE,
+    SOLDIER,
+    TUTORIAL_MODE,
+    heroes,
+)
 from ow174.game.script import graph as scripts
 from ow174.game.statescript import (
     CONTROLLER,
@@ -67,7 +74,6 @@ PICKED_HERO = 13161
 # initial values because the PvP controller does not run the full mode graph.
 OBJECTIVE_TEXT = 8975
 OBJECTIVE_COLOR_TEAM = 6999
-ATTACK_DEFEND_MODES = {0x0230000000000014, 0x0230000000000015, 0x0230000000000016}
 OBJECTIVE_STRINGS = {
     0x0230000000000007: 0x5886,  # Capture the Flag mode display name
     0x0230000000000009: 0x531D,  # Elimination, graph 0D0B
@@ -82,8 +88,8 @@ OBJECTIVE_STRINGS = {
 def objective_variables(mode: int, team: int) -> dict[int, Value]:
     """The localized objective and color team from the 104319 mode scripts."""
     color_team = 1
-    if mode in ATTACK_DEFEND_MODES:  # 0F4A: our first round spawns team 1 on offense
-        string = 0x6E64 if team == 1 else 0x6E63
+    if mode in ATTACK_DEFEND_MODES:
+        string = 0x6E64 if team == FIRST_ATTACKING_TEAM else 0x6E63
         color_team = team
     else:
         string = OBJECTIVE_STRINGS.get(mode)

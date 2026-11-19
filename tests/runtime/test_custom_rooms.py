@@ -14,8 +14,10 @@ from ow174.game.bits import BitReader
 from ow174.game.collision import StaticCollisionProvider, flat_world
 from ow174.game.content import PRACTICE_RANGE, SOLDIER, SPECTATOR_TEAM, game_map
 from ow174.game.match import SPECTATOR_BIT, Match
+from ow174.game.script import expr
 from ow174.game.script.decode import ClientBody, read_chunk, w_u32, w_var
 from ow174.game.script.expr import Asset
+from ow174.game.script.graph import graph
 from ow174.game.world import OP_DESTROY
 from ow174.jam.codec import Schemas
 from ow174.jam.groups import MATCH_LOBBY, MATCH_LOBBY_OUT
@@ -38,7 +40,7 @@ class CustomRoomTests(unittest.TestCase):
         self.schemas = Schemas()
         self.request = int(self.case["input"]["crc"], 16)
         self.reply = int(self.case["expected"]["crc"], 16)
-        self.card = {"+0x0": id16(42), "+0x10": id16(42), "+0x40": "Synthetic Player"}
+        self.card = {"+0x0": id16(42), "+0x10": id16(42), "+0x40": "TestPlayer"}
         self.server = SimpleNamespace(
             schemas=self.schemas,
             router=build_router(),
@@ -154,6 +156,12 @@ class CustomRoomTests(unittest.TestCase):
         return session, handoff
 
     def test_manual_mode_starts_in_the_same_match_after_the_lobby_request(self):
+        self.check_waiting_mode_starts_in_place("manual", 1, team=1)
+
+    def test_owner_can_start_an_unfilled_room(self):
+        self.check_waiting_mode_starts_in_place("full", 2, team=0)
+
+    def check_waiting_mode_starts_in_place(self, choice, slots, *, team):
         contract = self.fixture("custom-mode-start-v1.json")
         inputs, expected = contract["input"], contract["expected"]
         run = ProtocolHarness()
@@ -163,15 +171,15 @@ class CustomRoomTests(unittest.TestCase):
         self.create(session)
         room = session.custom_room
         mode = room.rules.modes[0]
-        manual = {"+0x0": inputs["choices"]["manual"], "+0x4": inputs["setting_id"],
-                  "+0x6": inputs["setting_value_type"]}
+        start = {"+0x0": inputs["choices"][choice], "+0x4": inputs["setting_id"],
+                 "+0x6": inputs["setting_value_type"]}
         selected = room.rules.maps[0]
-        map_rules = {**selected["+0x0"], "+0xC0": [{"+0x60": 0, "+0x61": 1}]}
+        map_rules = {**selected["+0x0"], "+0xC0": [{"+0x60": team, "+0x61": slots}]}
         self.dispatch(session, self.request, 24008, {
             "+0x78": {
                 **room.rules.options,
                 "+0x0": [{**selected, "+0x0": map_rules}],
-                "+0x18": [{**mode, "+0xD8": [*mode["+0xD8"], manual]}],
+                "+0x18": [{**mode, "+0xD8": [*mode["+0xD8"], start]}],
             },
             "+0x3D0": False,
         })
@@ -182,7 +190,8 @@ class CustomRoomTests(unittest.TestCase):
         self.assertEqual(room.match_id, match.id)
         self.assertIsNone(match.assemble_ends)
         self.assertTrue(player.select_open)
-        self.assertEqual(match.free_places(loaded_only=True), [0, 0])
+        self.assertEqual(player.team, team)
+        self.assertEqual(match.free_places(loaded_only=True)[team], slots - 1)
 
         run.message(link, 21616, pick(player.entity, SOLDIER))
         run.until(lambda: player.has_body and not player.select_open and player.mode_script.delivered)
@@ -205,9 +214,43 @@ class CustomRoomTests(unittest.TestCase):
 
         run.until(lambda: hero_select_waiting() is True)
         receive_script(world.GAME_MODE_ENTITY, mode_ui)
-        self.assertEqual(mode_ui.graphs[2], int(expected["wait_graph"], 16))
-        self.assertEqual(mode_ui.vars[(2, 1923)], Asset(int(expected["wait_heading"], 16)))
-        self.assertIn((2, expected["wait_presenter_state"]), mode_ui.on())
+        waiting, assembling = expected["wait_sender"], expected["assembly_sender"]
+        roles = self.fixture("custom-match-presentation-v1.json")["expected"]["pregame"]
+        phase_graph = int(waiting["graph"], 16)
+        objective = graph(phase_graph).state(roles["objective_sender_state"])
+        self.assertEqual(objective.field("m_gameMessage")["m_gameMessage"], roles["objective_message"])
+        text, color, _ = objective.field("m_params")
+
+        def check_objective():
+            self.assertEqual(mode_ui.vars[0, roles["attacking_variable"]], roles["attacking_team"])
+            self.assertEqual(mode_ui.vars[0, roles["defending_variable"]], roles["defending_team"])
+            context = Mock(spec=expr.Context)
+            context.var.side_effect = lambda scope, var: mode_ui.vars[0, var]
+            # The real client resolves 65ABFCCC against the local controller's team filter.
+            context.native.side_effect = lambda config: team if config["$"] == "STU_65ABFCCC" else None
+            self.assertEqual(
+                expr.evaluate(text["m_value"], context), controller.vars[3, heroselect.OBJECTIVE_TEXT],
+            )
+            self.assertEqual(
+                expr.evaluate(color["m_value"], context), controller.vars[3, heroselect.OBJECTIVE_COLOR_TEAM],
+            )
+
+        for sender in (waiting, assembling):
+            node = graph(int(sender["graph"], 16)).state(sender["state"])
+            self.assertEqual(node.field("m_gameMessage")["m_gameMessage"], sender["message"])
+        self.assertEqual(mode_ui.graphs[2], phase_graph)
+        self.assertIn((2, waiting["state"]), mode_ui.on())
+        check_objective()
+        self.assertNotIn((0, 1303), mode_ui.vars)
+        self.assertIs(mode_ui.vars[0, expected["wait_enabled_variable"]], True)
+        presenter_graph = int(expected["wait_graph"], 16)
+        presenter_state = expected["wait_presenter_state"]
+        presenter = graph(presenter_graph).state(presenter_state)
+        self.assertIn(expected["wait_heading"], json.dumps(presenter.field("m_EC32138E")))
+        self.assertEqual(mode_ui.graphs[4], presenter_graph)
+        self.assertEqual(mode_ui.vars[4, 1923], Asset(int(expected["wait_heading_fallback"], 16)))
+        self.assertIs(mode_ui.vars[4, expected["wait_enabled_variable"]], True)
+        self.assertIn((4, presenter_state), mode_ui.on())
 
         body = player.body
         action = {"+0x78": inputs["admin_start_mode_action"]}
@@ -225,9 +268,13 @@ class CustomRoomTests(unittest.TestCase):
 
         def countdown_received():
             receive_script(world.GAME_MODE_ENTITY, mode_ui)
-            return 2 not in mode_ui.graphs and mode_ui.vars.get((0, 1303), 0) > 0
+            return 4 not in mode_ui.graphs and mode_ui.vars.get((0, 1303), 0) > 0
 
         run.until(countdown_received)
+        self.assertIn((2, assembling["state"]), mode_ui.on())
+        self.assertNotIn((2, waiting["state"]), mode_ui.on())
+        check_objective()
+        self.assertIs(mode_ui.vars[0, expected["wait_enabled_variable"]], False)
         self.server.matchmaker._send_to_game.assert_called_once()
 
     def test_full_slots_wait_for_playing_clients_to_load(self):
