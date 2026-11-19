@@ -1292,7 +1292,7 @@ class Match:
         riders = [
             (p, local) for p in living if (local := geometry.rider(p.mover)) is not None
         ] if previous_cart and phase == escort.Phase.ACTIVE else []
-        mode.advance(now, ((p.team, p.mover.position) for p in living))
+        mode.advance(now, ((p.body, p.team, p.mover.position) for p in living))
         if geometry is not None and (previous_cart is not geometry.shapes
                                      or previous_rooms is not geometry.room_shapes):
             old = set(previous_cart + previous_rooms) - set(geometry.shapes + geometry.room_shapes)
@@ -1344,10 +1344,13 @@ class Match:
                 player.escort_door_states[entity] = state
         script = player.escort_payload_script
         previous_payload = player.escort_payload_state
+        previous = player.escort_mode_state
         payload = mode.payload_state()
         cart_phase_delivered = (previous_payload is not None and previous_payload.active == payload.active
                                 and not script.data_in_flight)
-        if (player.escort_payload_ready and not script.data_in_flight and payload != previous_payload
+        # The mode baseline starts the client-owned HUD before the cart's presenter needs it.
+        if (player.escort_payload_ready and player.mode_script.delivered
+                and not script.data_in_flight and payload != previous_payload
                 and (frame := payload.frame(previous_payload)) is not None):
             client.queue_entities(script.reliable_frames(frame, 4096, full=previous_payload is None))
             player.escort_payload_state = payload
@@ -1355,9 +1358,12 @@ class Match:
                 or (player.escort_payload_state is not None and not script.delivered)
                 or not all(stream.delivered for stream in player.escort_checkpoint_scripts.values())):
             return
-        previous = player.escort_mode_state
         state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered),
                                 viewer_team=player.team)
+        # Unlock the existing HUD objective before the mode announces live play.
+        if (not cart_phase_delivered and previous is not None
+                and escort.MATCH_LIVE in state.states and escort.MATCH_LIVE not in previous.states):
+            return
         # Register the native progress bindings after the active mode and cart
         # baselines have arrived, including for a viewer joining mid-round.
         bind_cart = (previous is not None and cart_phase_delivered and escort.HUD_PAYLOAD in previous.states

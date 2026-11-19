@@ -1,6 +1,8 @@
 import json
 import math
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from ow174.game import collision, content, escort
 from ow174.game.commands import Command
@@ -45,6 +47,7 @@ class EscortRoundContractTests(unittest.TestCase):
         self.assertEqual(mode.mode_state(0, self.assembly_ends).entity_vars[escort.COUNTDOWN][0],
                          self.assembly_ends)
         mode.start_setup(self.assembly_ends)
+        hud = self.expected["payload_hud"]
         for step, want in zip(self.request["steps"], self.expected["steps"], strict=True):
             with self.subTest(now=step["now"]):
                 mode.advance(step["now"], step["players"])
@@ -57,13 +60,65 @@ class EscortRoundContractTests(unittest.TestCase):
                     "contested": mode.contested,
                     "winner": mode.winner,
                 }, want)
+                cart = mode.payload_state()
+                self.assertEqual(cart.route_length, hud["route_length"])
+                self.assertEqual(cart.checkpoint_fractions, tuple(hud["checkpoint_fractions"]))
+                self.assertEqual(cart.distance, want["distance"])
+                # The native presenter checks 02BB first, then falls back based on 0270.
+                selector = "02BB" if cart.active else "60BA" if cart.enabled else "2A56"
+                self.assertEqual(selector, hud["visual_selectors"][want["phase"]])
+
+    def test_payload_hud_tracks_occupancy_and_movement(self):
+        mode = self.round
+        hud = self.expected["payload_hud"]
+        pushers_key = int(hud["pusher_list_variable"], 16)
+        blockers_key = int(hud["blocker_list_variable"], 16)
+        direction_key = int(hud["direction_variable"], 16)
+        mode.start_setup(self.assembly_ends)
+        start = mode.deadline
+        previous = None
+        for step, wanted in zip(self.request["payload_occupancy"], hud["occupancy_steps"], strict=True):
+            with self.subTest(seconds=step["seconds"]):
+                position = mode.movement().position
+                x, y, z = position
+                attackers = range(101, 101 + step["attackers"])
+                defenders = range(201, 201 + step["defenders"])
+                mode.advance(start + step["seconds"], [
+                    *((body, escort.ATTACKERS, position) for body in attackers),
+                    *((body, escort.DEFENDERS, position) for body in defenders),
+                    (301, escort.ATTACKERS, (x + 6, y, z)),
+                    (302, escort.DEFENDERS, (x, y + 5, z)),
+                ])
+                cart = mode.payload_state()
+                self.assertEqual(len(cart.pushers), wanted["count"])
+                self.assertEqual(cart.direction, wanted["direction"])
+                self.assertEqual(mode.contested, wanted["contested"])
+                self.assertAlmostEqual(mode.speed, wanted["speed"])
+                definition = SimpleNamespace(state=lambda _: SimpleNamespace(cls="synthetic"))
+                writer = "remote_full_frame" if previous is None else "remote_delta"
+                with (
+                    patch.object(escort.graph, "graph", return_value=definition),
+                    patch.object(escort, writer) as write,
+                ):
+                    cart.frame(previous)
+                (instance,), entity_vars, _ = write.call_args.args
+                for values, key, attribute, expected in (
+                    (entity_vars, direction_key, "direction", wanted["direction"]),
+                    (instance.vars, pushers_key, "pushers", tuple(map(expr.Entity, attackers))),
+                    (instance.vars, blockers_key, "blockers", tuple(map(expr.Entity, defenders))),
+                ):
+                    if previous is None or getattr(previous, attribute) != expected:
+                        self.assertEqual(values[key], (expected, ()))
+                    else:
+                        self.assertNotIn(key, values)
+                previous = cart
 
     def test_overtime_expires_when_attackers_leave_the_cart(self):
         mode = self.round
         mode.start_setup(self.assembly_ends)
         mode.advance(mode.deadline, ())
         end = mode.deadline
-        at_cart = [(team, (0, 0, 0)) for team in (escort.ATTACKERS, escort.DEFENDERS)]
+        at_cart = [(101, escort.ATTACKERS, (0, 0, 0)), (102, escort.DEFENDERS, (0, 0, 0))]
         mode.advance(end, at_cart)
         self.assertTrue(mode.overtime)
         self.assertEqual(mode.mode_state(end, self.assembly_ends).entity_vars[6971][0],
@@ -98,7 +153,7 @@ class EscortRoundContractTests(unittest.TestCase):
         self.assertNotIn(expected["escort_hud_state"], setup.states)
         self.assertEqual(setup.entity_vars[1923][0], expr.Asset(int(expected["setup_heading"], 16)))
         start = mode.deadline
-        mode.advance(start + 5, [(escort.ATTACKERS, (0, 0, 0))])
+        mode.advance(start + 5, [(101, escort.ATTACKERS, (0, 0, 0))])
         active = mode.mode_state(start + 5, self.assembly_ends)
         self.assertNotIn(expected["setup_sender_state"], active.states)
         self.assertIn(expected["active_sender_state"], active.states)
@@ -109,17 +164,22 @@ class EscortRoundContractTests(unittest.TestCase):
         attacker = mode.mode_state(start + 5, self.assembly_ends, viewer_team=escort.ATTACKERS)
         self.assertEqual(attacker.entity_vars[1923][0], expr.Asset(int(expected["attack_heading"], 16)))
         self.assertEqual(active.entity_vars[13468][0], 0.5)
-        self.assertEqual(escort.MODE_HUD_VALUES, int(expected["escort_hud_values_graph"], 16))
-        self.assertEqual(escort.MODE_HUD, int(expected["escort_hud_graph"], 16))
-        self.assertEqual(escort.MODE_HUD_HEADING, expected["escort_hud_heading_state"])
+        def graph_stub(index):
+            return SimpleNamespace(index=index, state=lambda _: SimpleNamespace(cls="synthetic"))
+
+        with (
+            patch.object(escort.graph, "graph", side_effect=graph_stub),
+            patch.object(escort, "remote_full_frame") as write_frame,
+        ):
+            active.frame(None)
+        listed_graphs = [f"{item.graph.index:04X}" for item in write_frame.call_args.args[0]]
+        self.assertEqual(listed_graphs, expected["active_mode_frame_graphs"])
         self.assertEqual(escort.HUD_PROGRESS_BINDINGS, tuple(expected["escort_hud_progress_bindings"]))
         context = active.entity_vars[int(expected["escort_hud_round_data"], 16)][0]
         self.assertEqual(context.get(int(expected["escort_hud_clock"], 16)), 55)
         self.assertEqual(context.get(escort.CHECKPOINT_INDEX), 0)
         self.assertIs(setup.entity_vars[int(expected["escort_hud_live_flag"], 16)][0], False)
         self.assertIs(active.entity_vars[int(expected["escort_hud_live_flag"], 16)][0], True)
-        self.assertIs(active.hud_vars[0x593E][0], False)
-        self.assertIs(attacker.hud_vars[0x593E][0], True)
         self.assertEqual(active.entity_vars[59][0], escort.Phase.ACTIVE)
         self.assertEqual(active.entity_vars[2190][0], expr.Entity(mode.payload))
         self.assertEqual(active.instance_vars[int(expected["escort_hud_cart_reference"], 16)][0],
@@ -137,7 +197,7 @@ class EscortRoundContractTests(unittest.TestCase):
         self.assertEqual([sorted(state.states) for state in (baseline, sample, closed)],
                          gate["closed_wire_states"])
         mode.advance(mode.deadline, ())
-        mode.advance(gate["opens_at"], [(escort.ATTACKERS, (0, 0, 0))])
+        mode.advance(gate["opens_at"], [(101, escort.ATTACKERS, (0, 0, 0))])
         release = mode.door_state(entity, gate["opens_at"], closed)
         self.assertEqual(release.states, closed.states)
         self.assertEqual(mode.door_state(entity, gate["clip_starts_at"] - 0.1, release), release)
@@ -191,7 +251,7 @@ class EscortRoundContractTests(unittest.TestCase):
         self.assertEqual(base.engine.query(*near), [])
         self.assertTrue(world.engine.query(*near))
         mode.start_setup(self.assembly_ends)
-        mode.advance(mode.deadline + 5, [(escort.ATTACKERS, (0, 0, 0))])
+        mode.advance(mode.deadline + 5, [(101, escort.ATTACKERS, (0, 0, 0))])
         self.assertEqual(world.engine.query(*near), [])
         self.assertTrue(world.engine.query((5, -2, -2), (9, 2, 2)))
 
@@ -216,7 +276,7 @@ class EscortRoundContractTests(unittest.TestCase):
             rider.step(Command(tick), dt)
             anchor = geometry.rider(rider)
             self.assertIsNotNone(anchor)
-            mode.advance(now + tick * dt, [(escort.ATTACKERS, rider.position)])
+            mode.advance(now + tick * dt, [(101, escort.ATTACKERS, rider.position)])
             geometry.carry(rider, anchor, dt)
         self.assertEqual(mode.movement().body_pitch, expected["body_pitch"])
         self.assertGreater(mode.distance, expected["min_progress_m"])

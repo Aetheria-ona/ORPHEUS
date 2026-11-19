@@ -26,14 +26,24 @@
     "assembly_ends": 30,
     "rider": {"checkpoint": [0, 2, 4], "support_radius": 1, "seconds": 0.016, "ticks": 60},
     "steps": [
-      {"now": 74, "players": [[1, [0, 0, 0]]]},
+      {"now": 74, "players": [[101, 1, [0, 0, 0]]]},
       {"now": 75, "players": []},
-      {"now": 80, "players": [[1, [0, 0, 0]], [0, [0, 0, 0]]]},
-      {"now": 90, "players": [[1, [0, 0, 0]]]},
-      {"now": 106, "players": [[3, [14, 0, 0]]]},
-      {"now": 116, "players": [[1, [14, 0, 0]]]},
-      {"now": 126, "players": [[1, [28, 0, 0]]]},
+      {"now": 80, "players": [[101, 1, [0, 0, 0]], [102, 0, [0, 0, 0]]]},
+      {"now": 90, "players": [[101, 1, [0, 0, 0]]]},
+      {"now": 106, "players": [[103, 3, [14, 0, 0]]]},
+      {"now": 116, "players": [[101, 1, [14, 0, 0]]]},
+      {"now": 126, "players": [[101, 1, [28, 0, 0]]]},
       {"now": 226, "players": []}
+    ],
+    "payload_occupancy": [
+      {"seconds": 0, "attackers": 0, "defenders": 0},
+      {"seconds": 1, "attackers": 1, "defenders": 0},
+      {"seconds": 2, "attackers": 2, "defenders": 0},
+      {"seconds": 3, "attackers": 3, "defenders": 0},
+      {"seconds": 4, "attackers": 4, "defenders": 0},
+      {"seconds": 5, "attackers": 2, "defenders": 1},
+      {"seconds": 6, "attackers": 0, "defenders": 1},
+      {"seconds": 16, "attackers": 0, "defenders": 0}
     ]
   },
   "expected": {
@@ -45,9 +55,7 @@
       "setup_receiver_states": [10, 53],
       "active_receiver_states": [2, 54],
       "escort_hud_state": 111,
-      "escort_hud_values_graph": "1B4A",
-      "escort_hud_graph": "1FEB",
-      "escort_hud_heading_state": 5,
+      "active_mode_frame_graphs": ["0F4A", "0CBB", "1B4A"],
       "escort_hud_progress_bindings": [105, 110],
       "escort_hud_round_data": "59DC",
       "escort_hud_clock": "0517",
@@ -58,6 +66,24 @@
       "defend_heading": "0x0DE00000000000F7",
       "attack_heading": "0x0DE00000000000F5",
       "escort_objective": "0x0D80000000002933"
+    },
+    "payload_hud": {
+      "route_length": 42,
+      "checkpoint_fractions": [0.3333333333333333, 0.6666666666666666, 1.0],
+      "visual_selectors": {"SETUP": "2A56", "ACTIVE": "02BB", "COMPLETE": "60BA"},
+      "pusher_list_variable": "1A9F",
+      "blocker_list_variable": "1AA0",
+      "direction_variable": "01B3",
+      "occupancy_steps": [
+        {"count": 0, "contested": false, "direction": 0, "speed": 0},
+        {"count": 1, "contested": false, "direction": 1, "speed": 1.4},
+        {"count": 2, "contested": false, "direction": 1, "speed": 1.65},
+        {"count": 3, "contested": false, "direction": 1, "speed": 1.9},
+        {"count": 4, "contested": false, "direction": 1, "speed": 1.9},
+        {"count": 2, "contested": true, "direction": 0, "speed": 0},
+        {"count": 0, "contested": false, "direction": 0, "speed": 0},
+        {"count": 0, "contested": false, "direction": -1, "speed": -0.03}
+      ]
     },
     "gate_presentation": {
       "index": 43,

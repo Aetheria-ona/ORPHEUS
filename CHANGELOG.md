@@ -4,6 +4,14 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-20
+
+#### Custom Escort
+
+- Restore the full single-round Escort flow from assembly and setup through payload movement, checkpoints, overtime, and results.
+- Restore the native Escort progress HUD. The mode creates the objective HUD once and synchronizes the cart's route, checkpoint markers, current distance, and phase. Verified the progress bar, cart icon, and route markers on Gibraltar in the original 104319 client.
+- Synchronize the nearby attackers and defenders and the cart's direction for the pusher count, contest state, and movement arrows. Encrypted loopback covers these values. Original-client checks for the count, arrows, and final gate poses are pending. Health-pack pickup, multi-round play, and stored-state replay remain open.
+
 ### 2026-11-19
 
 #### Private custom games
@@ -13,8 +21,7 @@ This log records tested changes and their acceptance status. Entries are grouped
 - Show the player's localized communication-wheel chat on their controller in Deathmatch and Bounty Hunter.
 - Run a single Escort round with setup, cart movement and collision, checkpoint progress, overtime and results. Load Escort objectives, health-pack placements and eligible scenery using catalogs generated from local 104319 data.
 - Fix Escort spawn-room logic. Select respawns using the current checkpoint and update doors, collision, and team-specific barriers as the round advances. Keep players supported by the moving payload and synchronize its segment and overall progress to the client.
-- The original client receives payload progress, but the Escort progress bar still does not render. Health-pack pickup, multi-round play and stored-state Escort replay remain open.
-- The original client verified basic private room and map loading, team and spectator transitions, in-match room controls, and returning and restarting. Remaining checks include Escort presentation and gates, preset subtitles, assembly prompts, free-for-all chat styling, and multi-client spectating. Shared rooms and Workshop execution remain open.
+- The original client verified basic private room and map loading, team and spectator transitions, in-match room controls, and returning and restarting. Remaining checks include preset subtitles, assembly prompts, free-for-all chat styling, and multi-client spectating. Shared rooms and Workshop execution remain open.
 
 ### 2026-11-18
 

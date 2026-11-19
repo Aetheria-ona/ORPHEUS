@@ -30,11 +30,16 @@ PAYLOAD_OBJECTIVE = expr.Asset(0x0D80000000002933)
 MODE_GRAPH = combat.PVP_PHASE_GRAPH
 MODE_MESSAGES = combat.MODE_PHASE_RECEIVER
 MODE_HUD_VALUES = 0x1B4A  # 0CBB state 50 registers the native HUD expressions
-MODE_HUD = 0x1FEB  # 0F4A state 11 adds the Escort presentation
-MODE_HUD_INSTANCE = 6
-MODE_HUD_HEADING = 5  # 1FEB's 0694 payload branch sets the live title
-MODE_UI_INSTANCE = 7  # child of 1FEB state 0, after its parent in the listing
 PAYLOAD_GRAPH = 0x1225
+PAYLOAD_DIRECTION = 0x01B3  # entity: forward 1, idle 0, rollback -1
+PAYLOAD_DISTANCE = 0x01DF
+PAYLOAD_ENABLED = 0x0270  # selects Completed instead of Locked when the cart is inactive
+PAYLOAD_ACTIVE = 0x02BB  # 1225 state 119 selects the route bar when this entity flag is set
+PAYLOAD_PUSHERS = 0x1A9F  # instance: attacker bodies used for PusherCount and MovementSpeed
+PAYLOAD_BLOCKERS = 0x1AA0  # instance: defender bodies used with the attacker list for IsContested
+PAYLOAD_CHECKPOINT_FRACTIONS = 0x1D9E  # instance array read by 1225 state 119
+PAYLOAD_ROUTE_LENGTH = 0x1D9F
+PAYLOAD_FINISH_FRACTION = 0x1EC7  # the full route in a single round
 DOOR_GRAPH = 0x0D32
 BARRIER_GRAPH = 0x0FA8
 ROOM_OVERLAY_GRAPH = 0x0D73
@@ -143,7 +148,6 @@ class ModeState:
     entity_vars: dict
     instance_vars: dict
     states: frozenset[int]
-    hud_vars: dict
 
     @property
     def phase_states(self) -> tuple[int, ...]:
@@ -165,10 +169,7 @@ class ModeState:
     ):
         mode, messages = graph.graph(MODE_GRAPH), graph.graph(MODE_MESSAGES)
         waiting = self.instance_vars[59][0] == Phase.WAITING
-        presentation = graph.graph(MODE_HUD)
-        graphs = {1: mode, 2: messages, MODE_HUD_INSTANCE: presentation}
-        show_heading = MATCH_LIVE in self.states
-        heading = presentation.state(MODE_HUD_HEADING)
+        graphs = {1: mode, 2: messages}
         if previous is None:
             states = {state: StateWire(mode.state(state).cls, True) for state in self.states}
             # 0CBB translates the mode's persistent phase messages for the client.
@@ -181,14 +182,8 @@ class ModeState:
                 0: StateWire(hud_values.state(0).cls, True),
             }))
             graphs[5] = hud_values
-            instances.append(InstanceWire(
-                MODE_HUD_INSTANCE, presentation, parent=(1, 11), vars=self.hud_vars,
-                states={MODE_HUD_HEADING: StateWire(heading.cls, True)} if show_heading else {},
-            ))
-            ui = graph.graph(combat.MODE_UI)
-            instances.append(InstanceWire(MODE_UI_INSTANCE, ui, parent=(MODE_HUD_INSTANCE, 0),
-                                          states={21: StateWire(ui.state(21).cls, True)}))
-            graphs[MODE_UI_INSTANCE] = ui
+            # Client-only 0F4A state 11 creates 1FEB and its common HUD descendants. Listing
+            # them here would create a second HUD and replace the payload's parent handle.
             if waiting:
                 hud = combat.waiting_hud(3)
                 instances.append(hud)
@@ -211,13 +206,6 @@ class ModeState:
             instances.append(InstanceWire(2, messages, states=receivers))
         if previous.instance_vars[59][0] == Phase.WAITING and not waiting:
             instances.append(InstanceWire(3, None, gone=True))
-        hud_vars = {key: value for key, value in self.hud_vars.items()
-                    if previous.hud_vars.get(key) != value}
-        hud_states = {}
-        if show_heading != (MATCH_LIVE in previous.states):
-            hud_states[MODE_HUD_HEADING] = StateWire(heading.cls, show_heading)
-        if hud_vars or hud_states:
-            instances.append(InstanceWire(MODE_HUD_INSTANCE, presentation, vars=hud_vars, states=hud_states))
         callout = (cart_changed, 1, HUD_CART_CHANGED) if cart_changed is not None else None
         if progress_cmfd is not None:
             return owner_delta(progress_cmfd, False, instances, entity_vars, graphs, callout=callout)
@@ -229,8 +217,14 @@ class PayloadState:
     animation: int
     stage: int
     progress: float
-    total: float
+    distance: float
+    route_length: float
+    checkpoint_fractions: tuple[float, ...]
     active: bool
+    enabled: bool
+    direction: int
+    pushers: tuple[expr.Entity, ...]
+    blockers: tuple[expr.Entity, ...]
 
     def frame(self, previous: "PayloadState | None"):
         definition = graph.graph(PAYLOAD_GRAPH)
@@ -242,12 +236,24 @@ class PayloadState:
             if previous is not None:
                 states[previous.animation] = StateWire(definition.state(previous.animation).cls, False)
             states[self.animation] = StateWire(animation.cls, True, {"counter": 1})
-        values = {0x009A: (self.progress, ()), 0x1EC7: (self.total, ()), 0x2934: (self.stage, ())}
-        # 1225's 09B1 handler sets instance 0270 to enable the cart. Its
-        # checkpoint logic reads the current stage from the instance store.
-        instance = InstanceWire(1, definition, vars={
-            0x0270: (self.active, ()), 0x2934: (self.stage, ()),
-        }, states=states)
+        values = {0x009A: (self.progress, ()), PAYLOAD_DISTANCE: (self.distance, ()),
+                  CHECKPOINT_INDEX: (self.stage, ())}
+        if previous is None or self.active != previous.active:
+            values[PAYLOAD_ACTIVE] = (self.active, ())
+        if previous is None or self.direction != previous.direction:
+            values[PAYLOAD_DIRECTION] = (self.direction, ())
+        # 2D8.05E maps 02BB to Active and 2A56 to Locked. The remaining value (60BA) uses Completed.
+        instance_vars = {PAYLOAD_ENABLED: (self.enabled, ()), CHECKPOINT_INDEX: (self.stage, ())}
+        if previous is None or self.pushers != previous.pushers:
+            instance_vars[PAYLOAD_PUSHERS] = (self.pushers, ())
+        if previous is None or self.blockers != previous.blockers:
+            instance_vars[PAYLOAD_BLOCKERS] = (self.blockers, ())
+        if previous is None:
+            # The cart's presenter converts each fraction to a distance using the route length.
+            values[PAYLOAD_ROUTE_LENGTH] = (self.route_length, ())
+            values[PAYLOAD_FINISH_FRACTION] = (1.0, ())
+            instance_vars[PAYLOAD_CHECKPOINT_FRACTIONS] = (self.checkpoint_fractions, ())
+        instance = InstanceWire(1, definition, vars=instance_vars, states=states)
         write = remote_full_frame if previous is None else remote_delta
         return write([instance], values, {1: definition})
 
@@ -273,6 +279,7 @@ class EscortRound:
                         for p, cubic, quadratic, linear in zip(point.position, a, b, c, strict=True)
                     ))
         self.length = self.distances[-1]
+        self.checkpoint_fractions = tuple(distance / self.length for distance, _ in self.checkpoints)
         self.start_offset = contacts.sub(scene.payload_origin or self.positions[0], self.positions[0])
         self.start_angles = None
         if scene.payload_rotation is not None:
@@ -284,8 +291,8 @@ class EscortRound:
         self.last_update = 0.0
         self.last_attacker = 0.0
         self.overtime = False
-        self.contested = False
-        self.attackers = 0
+        self.pushers: tuple[expr.Entity, ...] = ()
+        self.blockers: tuple[expr.Entity, ...] = ()
         self.animation = 23  # 1225 state 23: looping idle, from node 37's false branch
         self.speed = 0.0
         self.winner: int | None = None
@@ -427,8 +434,12 @@ class EscortRound:
             2190: (expr.Entity(self.payload), ()),
         }, {})
 
+    @property
+    def contested(self) -> bool:
+        return bool(self.pushers and self.blockers)
+
     def advance(self, now: float, participants) -> None:
-        """Consume elapsed match time and the current positions of living players."""
+        """Consume elapsed match time and living players as (body, team, position)."""
         previous_room = self.phase, self.stage
         if self.phase == Phase.SETUP and now >= self.deadline:
             self.phase = Phase.ACTIVE
@@ -438,27 +449,29 @@ class EscortRound:
             return
         x, y, z = self._pose()[0]
         previous_distance = self.distance
-        nearby = [team for team, (px, py, pz) in participants
-                  if team in (ATTACKERS, DEFENDERS) and abs(py - y) <= PUSH_HEIGHT
-                  and math.hypot(px - x, pz - z) <= PUSH_RADIUS]
-        was_escorted = self.attackers > 0
-        self.attackers = min(nearby.count(ATTACKERS), len(PUSH_SPEED) - 1)
-        self.contested = self.attackers > 0 and DEFENDERS in nearby
+        nearby = {ATTACKERS: [], DEFENDERS: []}
+        for body, team, (px, py, pz) in participants:
+            if team in nearby and abs(py - y) <= PUSH_HEIGHT and math.hypot(px - x, pz - z) <= PUSH_RADIUS:
+                nearby[team].append(expr.Entity(body))
+        was_escorted = bool(self.pushers)
+        self.pushers = tuple(nearby[ATTACKERS])
+        self.blockers = tuple(nearby[DEFENDERS])
         end = self.deadline
         if self.overtime:
-            if self.attackers and (was_escorted or now < self.last_attacker + OVERTIME_SECONDS):
+            if self.pushers and (was_escorted or now < self.last_attacker + OVERTIME_SECONDS):
                 self.last_attacker = now
             end = self.last_attacker + OVERTIME_SECONDS
-        elif now >= end and self.attackers:
+        elif now >= end and self.pushers:
             self.overtime = True
             self.last_attacker = now
             end = now + OVERTIME_SECONDS
         elapsed = max(0.0, min(now, end) - self.last_update)
         self.last_update = now
-        if self.attackers and now < end:
+        if self.pushers and now < end:
             self.last_attacker = now
             if not self.contested:
-                self._push(elapsed * PUSH_SPEED[self.attackers], now)
+                speed_tier = min(len(self.pushers), len(PUSH_SPEED) - 1)
+                self._push(elapsed * PUSH_SPEED[speed_tier], now)
         elif now > self.last_attacker + ROLLBACK_DELAY:
             rollback = min(elapsed, now - self.last_attacker - ROLLBACK_DELAY)
             floor = self.checkpoints[self.stage - 1][0] if self.stage else 0.0
@@ -490,8 +503,7 @@ class EscortRound:
         self.phase = Phase.COMPLETE
         self.winner = team
         self.overtime = False
-        self.attackers = 0
-        self.contested = False
+        self.pushers = self.blockers = ()
 
     def mode_state(
         self, now: float, assembly_end: float | None, *, hero_select_ready: bool = True,
@@ -555,11 +567,6 @@ class EscortRound:
             13555: (round(self.distance / self.length, 3), ()),
             7525: (self.winner, ()),
         }
-        # 1FEB state 5 selects an entry from its original attack/defend title list.
-        hud_vars = {
-            0x593E: (viewer_team == ATTACKERS, ()),
-            0x59C6: (tuple(expr.Asset(title) for title in reversed(ACTIVE_HEADING)), ()),
-        }
         states = {4, 95, HUD_OBJECTIVE_KIND}
         states.update({
             Phase.WAITING: (combat.WAITING_FOR_PLAYERS_STATE,),
@@ -570,7 +577,7 @@ class EscortRound:
         }[phase])
         if self.overtime:
             states.add(57)
-        return ModeState(entity_vars, instance_vars, frozenset(states), hud_vars)
+        return ModeState(entity_vars, instance_vars, frozenset(states))
 
     def progress(self) -> tuple[int, float]:
         goal = min(self.stage, len(self.checkpoints) - 1)
@@ -579,8 +586,10 @@ class EscortRound:
 
     def payload_state(self) -> PayloadState:
         goal, progress = self.progress()
-        return PayloadState(self.animation, goal, round(progress, 3), round(self.distance / self.length, 3),
-                            self.phase == Phase.ACTIVE)
+        direction = int(self.speed > 0) - int(self.speed < 0)
+        return PayloadState(self.animation, goal, round(progress, 3), self.distance, self.length,
+                            self.checkpoint_fractions, self.phase == Phase.ACTIVE, self.phase >= Phase.ACTIVE,
+                            direction, self.pushers, self.blockers)
 
     def door_state(self, entity: int, now: float, previous: DoorState | None) -> DoorState:
         opened = self.door_open(entity)

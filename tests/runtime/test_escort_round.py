@@ -181,6 +181,7 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertIsNotNone(mode)
         checkpoint_uis = {entity: decode.ClientBody() for _, entity in mode.checkpoints}
         door_uis, visible_barriers, mode_actions, progress_frames = {}, {}, {}, {}
+        local_hud_graphs = {0x1FEB, combat.MODE_UI, 0x106B}
 
         def receive(peer, mode_client, cart_client):
             pos = None
@@ -212,8 +213,16 @@ class EscortRoundWireTests(unittest.TestCase):
                     first = decode.w_u32(header)
                     last = first + decode.w_var(header)
                     if first <= receiver.applied + 1 and last > receiver.applied:
+                        if receiver is cart_client and not receiver.applied:
+                            self.assertEqual(mode_client.graphs.get(1), escort.MODE_GRAPH)
                         frame = receiver.apply(record)
                         if receiver is mode_client:
+                            self.assertTrue(local_hud_graphs.isdisjoint(mode_client.graphs.values()))
+                            phase_update = frame.instances.get(1)
+                            if (first and phase_update
+                                    and phase_update.states.get(escort.MATCH_LIVE) == (True, {})):
+                                self.assertIs(cart_client.vars[0, escort.PAYLOAD_ACTIVE], True)
+                                self.assertIs(cart_client.vars[1, escort.PAYLOAD_ENABLED], True)
                             mode_actions.setdefault(peer, []).extend(frame.actions)
                             if frame.owner:
                                 progress_frames.setdefault(peer, []).append(frame)
@@ -242,6 +251,20 @@ class EscortRoundWireTests(unittest.TestCase):
                     self.assertIs(ui.vars[1, 0x02BB], playing)
                     self.assertIs(ui.vars[1, 0x3DF2], not playing and pose != escort.DoorPose.OPEN)
 
+        def check_cart_route(cart):
+            # 1225 state 119 positions the 2C8 HUD markers using these replicated values.
+            route_length = cart.vars[0, 0x1D9F]
+            self.assertAlmostEqual(route_length, mode.length, delta=0.001)
+            self.assertEqual(cart.vars[0, 0x1EC7], 1.0)
+            fractions = cart.vars[1, 0x1D9E]
+            for fraction, (distance, _) in zip(fractions, mode.checkpoints, strict=True):
+                self.assertAlmostEqual(fraction * route_length, distance, delta=0.001)
+            stage = cart.vars[1, 0x2934]
+            start = fractions[stage - 1] * route_length if stage else 0.0
+            section_length = fractions[stage] * route_length - start
+            distance = start + cart.vars[0, 0x009A] * section_length
+            self.assertAlmostEqual(cart.vars[0, 0x01DF], distance, delta=0.001 + 0.0005 * section_length)
+
         run.until(lambda: player.mode_script.delivered and player.escort_payload_script.delivered
                   and not player.mode_script.data_in_flight and player.escort_mode_state is not None
                   and combat.ASSEMBLE_HEROES_STATE in player.escort_mode_state.states)
@@ -263,6 +286,7 @@ class EscortRoundWireTests(unittest.TestCase):
             self.assertEqual(checkpoint.vars[(0, 10548)], i)
             self.assertEqual(checkpoint.vars[(0, 2190)], expr.Entity(mode.payload))
         self.assertEqual(cart_ui.on(), {(1, 23)})
+        check_cart_route(cart_ui)
         self.assertLess(math.dist(mode.movement().position, pos), 0.002)
         run.message(link, 21616, pick(player.entity, content.SOLDIER))
         run.until(lambda: player.has_body)
@@ -275,15 +299,17 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(mode_ui.vars[(0, escort.COUNTDOWN)], 45)
         self.assertEqual(mode_ui.vars[(0, 1923)], expr.Asset(0x0DE0000000006116))
         self.assertNotIn((1, combat.ASSEMBLE_HEROES_STATE), mode_ui.on())
-        self.assertNotIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), mode_ui.on())
+        self.assertIs(cart_ui.vars[0, escort.PAYLOAD_ACTIVE], False)
+        self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], False)
         self.assertFalse(player.select_open)
         check_rooms(link, player)
 
         late_link, late_player = run.connect(late)
-        run.until(lambda: late_player.mode_script.delivered)
+        run.until(lambda: late_player.escort_payload_script.delivered)
         late_mode, late_cart = decode.ClientBody(), decode.ClientBody()
         receive(late_link, late_mode, late_cart)
         self.assertEqual(late_mode.vars[(1, 59)], escort.Phase.SETUP)
+        self.assertIs(late_cart.vars[0, escort.PAYLOAD_ACTIVE], False)
         self.assertTrue(late_player.select_open)
         check_rooms(late_link, late_player)
         late_first_spawn = late_player.spawn
@@ -311,15 +337,10 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(mode_ui.records[2], (escort.MODE_MESSAGES, (1, 12)))
         self.assertEqual(mode_ui.records[5], (escort.MODE_HUD_VALUES, (2, 50)))
         self.assertIn((5, 0), mode_ui.on())
-        self.assertEqual(mode_ui.records[escort.MODE_HUD_INSTANCE], (escort.MODE_HUD, (1, 11)))
-        self.assertIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), mode_ui.on())
-        self.assertIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), late_mode.on())
-        self.assertNotIn((escort.MODE_HUD_INSTANCE, 21), mode_ui.on())  # round-result panel
-        self.assertIs(mode_ui.vars[escort.MODE_HUD_INSTANCE, 0x593E], True)
-        self.assertIs(late_mode.vars[escort.MODE_HUD_INSTANCE, 0x593E], False)
         context = mode_ui.vars[0, escort.HUD_ROUND_DATA]
         self.assertEqual(context.get(escort.CHECKPOINT_INDEX), 0)
         self.assertEqual(context.get(escort.HUD_CLOCK), 240)
+        self.assertIs(context.get(0x2259), True)  # the native presenter selects the payload title branch
         self.assertIs(mode_ui.vars[0, 0x4C47], True)
         self.assertEqual(mode_ui.vars[0, 59], escort.Phase.ACTIVE)
         self.assertEqual(mode_ui.vars[0, 2190], expr.Entity(mode.payload))
@@ -334,23 +355,21 @@ class EscortRoundWireTests(unittest.TestCase):
             self.assertTrue(all(binding_frame.instances[1].states[state] == (True, {})
                                 for state in escort.HUD_PROGRESS_BINDINGS))
             self.assertTrue({(1, state) for state in escort.HUD_PROGRESS_BINDINGS} <= client.on())
-        self.assertIs(cart_ui.vars[1, 0x0270], True)
+        self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], True)
         self.assertEqual(cart_ui.vars[1, 0x2934], 0)
-        self.assertEqual(mode_ui.records[escort.MODE_UI_INSTANCE],
-                         (combat.MODE_UI, (escort.MODE_HUD_INSTANCE, 0)))
-
-        native_heading = graph.graph(escort.MODE_HUD).state(escort.MODE_HUD_HEADING).field("m_value")
-
-        class HeadingContext(expr.Context):
-            def __init__(self, client):
-                self.client = client
-
-            def var(self, scope, variable):
-                return self.client.vars.get((0 if scope else escort.MODE_HUD_INSTANCE, variable))
-
-        for team, client in ((escort.ATTACKERS, mode_ui), (escort.DEFENDERS, late_mode)):
-            title = expr.evaluate(native_heading, HeadingContext(client))
-            self.assertEqual(title, expr.Asset(escort.ACTIVE_HEADING[team]))
+        self.assertEqual(cart_ui.vars[1, 0x1A9F], ())
+        self.assertEqual(cart_ui.vars[1, 0x1AA0], ())
+        self.assertEqual(cart_ui.vars[0, 0x01B3], 0)
+        check_cart_route(cart_ui)
+        self.assertEqual(cart_ui.vars[0, 0x01DF], 0.0)
+        native_adder = graph.graph(escort.MODE_GRAPH).state(11)
+        self.assertTrue(native_adder.client_only)
+        self.assertEqual(native_adder.field("m_36F7B64C.m_36F7B64C.m_C974E369.m_graph"),
+                         "0x0580000000001FEB")
+        container = graph.graph(0x1FEB).state(2)
+        self.assertEqual(container.cls, "STUStatescriptStateUXPresenter")
+        self.assertEqual(container.field("m_45216F79.m_D44EB181.m_identifier"), 0x2CB5)
+        self.assertEqual(container.field("m_45017CEA.m_identifier"), 0x2F9E)
 
         class ObjectiveContext(expr.Context):
             def var(self, scope, variable):
@@ -381,10 +400,12 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(active_mode.vars[1, 59], escort.Phase.ACTIVE)
         self.assertEqual(active_mode.vars[1, escort.HUD_CART_REFERENCE], expr.Entity(mode.payload))
         self.assertIn((5, 0), active_mode.on())
-        self.assertIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), active_mode.on())
+        self.assertEqual(active_mode.vars[0, 1923], expr.Asset(escort.ACTIVE_HEADING[escort.DEFENDERS]))
         self.assertEqual(len(progress_frames[active_link]), 1)
         self.assertTrue({(1, state) for state in escort.HUD_PROGRESS_BINDINGS} <= active_mode.on())
-        self.assertIs(active_cart.vars[1, 0x0270], True)
+        self.assertIs(active_cart.vars[1, escort.PAYLOAD_ENABLED], True)
+        self.assertIs(active_cart.vars[0, escort.PAYLOAD_ACTIVE], True)
+        check_cart_route(active_cart)
         self.assertEqual([(target, node) for _, target, node in mode_actions[active_link]],
                          [(1, escort.HUD_CART_CHANGED)])
         for entity in mode.doors:
@@ -405,6 +426,11 @@ class EscortRoundWireTests(unittest.TestCase):
             self.assertLess(player.mover.position[2], z - 0.2)
             self.assertGreater(mode.distance, 0.0)
             receive(link, mode_ui, cart_ui)
+            check_cart_route(cart_ui)
+            self.assertGreater(cart_ui.vars[0, 0x01DF], 0.0)
+            self.assertLess(cart_ui.vars[0, 0x01DF], cart_ui.vars[0, 0x1D9F])
+            self.assertEqual(cart_ui.vars[1, 0x1A9F], (expr.Entity(player.body),))
+            self.assertEqual(cart_ui.vars[0, 0x01B3], 1)
             self.assertGreater(mode_ui.vars[(0, 13468)], 0.0)
             native_progress = graph.graph(escort.MODE_GRAPH).state(escort.HUD_PROGRESS).field("m_value")
             progress = expr.evaluate(native_progress, ObjectiveContext())
@@ -416,6 +442,21 @@ class EscortRoundWireTests(unittest.TestCase):
                 self.assertEqual(int(field["m_identifier"], 16) & 0xFFFF, key)
                 self.assertIn((1, state), mode_ui.on())
                 self.assertGreater(expr.evaluate(field["m_value"], ObjectiveContext()), 0.0)
+
+        run.message(late_link, 21616, pick(late_player.entity, content.SOLDIER))
+        run.until(lambda: late_player.has_body)
+        player.mover.position = late_player.mover.position = mode.movement().position
+        run.step(12)
+        for peer, mode_ui_peer, cart in ((link, mode_ui, cart_ui), (late_link, late_mode, late_cart)):
+            receive(peer, mode_ui_peer, cart)
+            self.assertEqual(cart.vars[1, 0x1A9F], (expr.Entity(player.body),))
+            self.assertEqual(cart.vars[1, 0x1AA0], (expr.Entity(late_player.body),))
+            self.assertEqual(cart.vars[0, 0x01B3], 0)
+        late_player.mover.position = late_first_spawn[0]
+        run.step(12)
+        receive(link, mode_ui, cart_ui)
+        self.assertEqual(cart_ui.vars[1, 0x1AA0], ())
+        self.assertEqual(cart_ui.vars[0, 0x01B3], 1)
         windows = []
         for stage in (1, 2, 3):
             end_before = mode.deadline
@@ -434,12 +475,13 @@ class EscortRoundWireTests(unittest.TestCase):
             receive(late_link, late_mode, late_cart)
             check_rooms(link, player)
             check_rooms(late_link, late_player)
+            check_cart_route(cart_ui)
+            check_cart_route(late_cart)
             self.assertLess(math.dist(mode.movement().position, pos), 0.002)
             windows.append(mode.deadline - end_before)
             if stage < 3:
                 self.assertEqual(mode_ui.vars[0, escort.CHECKPOINT_INDEX], stage)
                 self.assertEqual(mode_ui.vars[0, escort.HUD_ROUND_DATA].get(escort.CHECKPOINT_INDEX), stage)
-                self.assertIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), mode_ui.on())
                 self.assertEqual(mode_ui.vars[(1, 10551)], expr.Entity(mode.checkpoints[stage][1]))
                 self.assertEqual(cart_ui.on(), {(1, 17)})
                 self.assertNotEqual(player.spawn, first_spawn)
@@ -449,5 +491,9 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(mode_ui.vars[(1, 59)], escort.Phase.COMPLETE)
         self.assertEqual(mode_ui.vars[(1, 7525)], escort.ATTACKERS)
         self.assertIn((1, 20), mode_ui.on())  # 0F4A sends the winning team in message 0695
-        self.assertNotIn((escort.MODE_HUD_INSTANCE, escort.MODE_HUD_HEADING), mode_ui.on())
         self.assertEqual(cart_ui.on(), {(1, 23)})
+        self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], True)
+        self.assertIs(cart_ui.vars[0, escort.PAYLOAD_ACTIVE], False)
+        self.assertEqual(cart_ui.vars[1, 0x1A9F], ())
+        self.assertEqual(cart_ui.vars[0, 0x01B3], 0)
+        self.assertAlmostEqual(cart_ui.vars[0, 0x01DF], cart_ui.vars[0, 0x1D9F], delta=0.001)
