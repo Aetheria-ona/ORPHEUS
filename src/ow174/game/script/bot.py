@@ -4,8 +4,15 @@ from ow174.game import observers
 from ow174.game.bits import BitWriter
 from ow174.game.bots import FIRING
 from ow174.game.content import PRACTICE_RANGE_MODE
+from ow174.game.mover import SET, movement_sample_flags
 from ow174.game.script import expr, graph, runtime
-from ow174.game.script.driver import OWNER_HEALTH, ReplicatedBody, Snapshot, create_body_graphs
+from ow174.game.script.driver import (
+    OWNER_HEALTH,
+    UPPERCUT_TARGET_GRAPH,
+    ReplicatedBody,
+    Snapshot,
+    create_body_graphs,
+)
 
 DIED = 0x024000000000003E  # 003E.025, the body's authoritative death message
 RESET = 0x0240000000000013  # 0013.025, the placement's eligibility reset
@@ -43,6 +50,20 @@ class BotWorld(runtime.World):
         self.manual_nameplate = manual_nameplate
         self.match = None
         self.manual_target = None
+        self.patrol_sample = None  # while receiving a supported PlayScript on a floor-following placement
+        self.patrol_stop_frame = None
+
+    def movement_sample(self) -> int | None:
+        return self.patrol_sample
+
+    def queue_velocity_changes(self, frame, source, changes):
+        # Floor-following placements support a full stop. Other impulses require
+        # a controller that owns free movement, including lifting off and landing.
+        if self.patrol_sample is not None and len(changes) == 1 and changes[0][1:4] == (0, SET, 0.0):
+            self.patrol_stop_frame = frame + 1
+
+    def retires_stopped_play(self, instance):
+        return instance.graph.index == UPPERCUT_TARGET_GRAPH
 
     def ai_weapon_button(self, slot: int) -> int | None:
         if self.hero == 0x02E00000000001BB and self.controller_components is not None and slot == 0:
@@ -205,6 +226,34 @@ class BotScript(ReplicatedBody):
         if instance is not None:
             runtime.send_instance_message(instance, ENABLE_NAMEPLATE, {}, sender)
 
+    @property
+    def receiving_play(self) -> bool:
+        return self.component.world.patrol_sample is not None
+
+    def sample_patrol(self, bot, frame):
+        pose = bot.movement(frame)
+        self.component.world.patrol_sample = movement_sample_flags(pose.flags, pose.velocity, pose.throttles)
+
+    def receive_play(self, bot, request, frame):
+        """Start the victim's authored timer at delivery even on a previously idle placement."""
+        from ow174.game.script.play_queue import submit_loaded
+
+        if frame < self.frame or self.component.owner_dead or self.component.fault is not None:
+            return
+        self.sample_patrol(bot, frame)
+        if self.frame < frame:
+            self.component.run_frame(frame)
+            self.frame = frame
+        if submit_loaded(self.component, request):
+            self.component.run_now()
+        self._finish_play()
+
+    def _finish_play(self):
+        if self.receiving_play and not any(
+            instance.graph.index == UPPERCUT_TARGET_GRAPH for instance in self.component.instances.values()
+        ):
+            self.component.world.patrol_sample = None
+
     def advance_live(self, frame: int, position: tuple | None = None) -> Snapshot | None:
         """Advance a live weapon body and freeze its latest observer baseline."""
         if frame <= self.frame or self.component.owner_dead:
@@ -213,6 +262,7 @@ class BotScript(ReplicatedBody):
         if self.behavior is not None and position is not None:
             self.component.world.owner_position = expr.Vec3(*position)
         self.component.run_frame(frame)
+        self._finish_play()
         from ow174.game import assassin
 
         assassin.refresh_control(self.component.world, self.component)

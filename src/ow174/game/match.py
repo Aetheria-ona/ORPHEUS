@@ -89,6 +89,7 @@ from ow174.game.script import expr, graph, nodes, play, runtime, scene_host, spr
 from ow174.game.script.bot import BotScript
 from ow174.game.script.driver import (
     DOOMFIST_PASSIVE_GRAPH,
+    UPPERCUT_TARGET_GRAPH,
     WHEEL_ACTION_CATEGORIES,
     WHEEL_ACTION_PREFIX,
     WHEEL_SPRAY_ACTIONS,
@@ -1138,8 +1139,10 @@ class Match:
                     npc_navigation.step(self, bot, tick, RETAIL_QUANTA / 1e6,
                                         plan_budget=budgets.get(bot.entity, 0))
                     continue
+                script = bot.body_script
+                stop = script.component.world.patrol_stop_frame if isinstance(script, BotScript) else None
                 bot.step(tick, RETAIL_QUANTA / 1e6, self.collision_world,
-                         paused_until=self.combat.stuns.get(bot.entity, 0))
+                         paused_until=self.combat.stuns.get(bot.entity, 0), stop_frame=stop)
         if ready:
             self.combat.update(now, tick, frames=frames)
         if self.assemble_ends is not None and not self.assembled and now >= self.assemble_ends:
@@ -1530,10 +1533,18 @@ class Match:
     ) -> bool:
         """Capture the source and recipient scripts before either entity ID can be reused."""
         source, recipient = self._message_player(sender), self._message_player(target)
-        if source is None or recipient is None:
+        if source is None or source.body_script is None or source.body_script.retired:
+            return False
+        if recipient is None and isinstance(message, play.Request) and (
+                message.resource.guid == (graph.GRAPH_TYPE << 48 | UPPERCUT_TARGET_GRAPH)):
+            # Manual and scene NPCs have independent navigation/control owners.
+            recipient = next((bot for bot in self.bots if bot.entity == target and not bot.dead
+                              and bot.spawner.get("manual_spawn") is not True
+                              and isinstance(bot.body_script, BotScript)), None)
+        if recipient is None or recipient.body_script is None:
             return False
         source_script, script = source.body_script, recipient.body_script
-        if source_script is None or source_script.retired or script is None or script.retired:
+        if isinstance(recipient, Player) and script.retired:
             return False
         if len(self._body_messages) >= MAX_BODY_MESSAGES:
             expr.warn_once("body-message-limit", "match body message queue reached %d", MAX_BODY_MESSAGES)
@@ -1550,6 +1561,14 @@ class Match:
         # Messages emitted by a receiver enter the next batch, outside its VM call stack.
         for source, player, script, message, params, target_instance, *arrival in pending:
             if source.retired or source.component.fault is not None:
+                continue
+            if isinstance(player, bots.Bot):
+                if player in self.bots and not player.dead and player.body_script is script:
+                    try:
+                        script.receive_play(player, message, self.tick)
+                    except Exception:
+                        log.exception("[game] %s: %s's target script failed", self.label(), player.name)
+                        player.body_script = None
                 continue
             if player.body_script is not script or script.retired or not self._shown(player):
                 continue

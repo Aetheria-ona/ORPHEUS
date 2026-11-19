@@ -2,6 +2,8 @@
 
 Community contributions are welcome across code, protocol research, documentation, and original-client testing. Check [docs/ROADMAP.md](docs/ROADMAP.md) and [open issues](https://github.com/leafall903/ORPHEUS/issues) to find an item whose prerequisites match what you have locally.
 
+GitHub is scheduled to open new pull requests against `rust` by default from November 19, 2026 at 12:00 UTC. When submitting Python work, choose `main` in the **base** selector. Both branches accept normal pull requests. [Default branch change](docs/BRANCH_TRANSITION.md).
+
 - **`main`:** Python server, Windows launcher, data extraction tools, and shared behavior tests.
 - **`rust`:** Native Rust server ([Rust branch](https://github.com/leafall903/ORPHEUS/tree/rust)).
 
@@ -42,13 +44,19 @@ git diff --check
 
 ### Prepared Runtime Tests
 
-If you have a local `1.74.0.0.104319` runtime pack, point `ORPHEUS_RUNTIME_DIR` to it and run individual suites in `tests/runtime/` directly from the repository root:
+From the repository root, point the suite runner at a prepared `1.74.0.0.104319` pack. It checks the pack with `python -m orpheus --check-runtime` before discovering `tests/runtime/`.
 
 ```powershell
 $env:ORPHEUS_RUNTIME_DIR = 'C:\path\to\orpheus-runtime'
-.\scripts\START.bat --check-runtime
-.\.venv\Scripts\python.exe -B -m unittest tests/runtime/test_game_projectiles.py -v
+.\.venv\Scripts\python.exe -B scripts/run_runtime_tests.py
+.\.venv\Scripts\python.exe -B scripts/run_runtime_tests.py --pattern test_game_projectiles.py -k projectile
 ```
+
+`--runtime-dir DIR` overrides the environment variable. `--pattern` selects module filenames and repeatable `-k` filters test names as in unittest. The console shows counts, elapsed time, the SHA-256 of the manifest and relevant test IDs. The complete preflight and test output stays in a new private log under `logs/`. Use `--log PATH` to specify a local file in an existing private directory. Keep this log on the machine that ran the suite.
+
+To track regressions, run the **whole suite** with `--write-baseline candidate.txt`, review the failed and errored test IDs, and use the reviewed file with `--baseline candidate.txt` on later runs. Each line accepts a test ID, an optional platform qualifier such as `[linux-arm64]`, and an optional `# comment`. Without a qualifier the entry applies on every platform. Generating a baseline still reports new failures. Writing a baseline from a subset includes only that subset.
+
+Exit code `0` means the selected tests finished within the baseline and skip limit. Exit code `1` indicates new failures, errors, unexpected successes, or more than `--max-skips N` skipped cases. Exit code `2` indicates a setup or runner error, including empty selection. Each failed subtest is attributed to its test method. Only a positive pass in this run qualifies a baseline entry for removal.
 
 ### Original-Client Testing
 

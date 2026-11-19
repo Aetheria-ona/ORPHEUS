@@ -553,6 +553,26 @@ class BotNoticeTests(unittest.TestCase):
         self.assertEqual(self.notices(reliable), [])
         self.assertIn((self.entity, world.OP_CREATE), records)
 
+    def test_old_hit_keeps_its_body_through_a_full_switch_cycle(self):
+        lost = self.retire_player_with_lost_hit()
+        seen = {self.entity, self.victim.body}
+        with patch("ow174.game.match.BODY_SCRIPT_HEROES", set()):
+            for _ in range(253):
+                self.assertTrue(self.match.switch_hero(self.victim, self.victim.hero))
+                self.assertNotIn(self.victim.body, seen)
+                seen.add(self.victim.body)
+            self.assertEqual(len(seen), 255)
+            current = self.victim.body
+            self.assertFalse(self.match.switch_hero(self.victim, self.victim.hero))
+            self.assertEqual(self.victim.body, current)
+
+        _, records = self.send(104)
+        self.assertNotIn((self.entity, world.OP_CREATE), records)
+        self.ack()
+        reliable, records = self.send(107)
+        self.assertEqual(self.notices(reliable), lost)
+        self.assertNotIn((self.entity, world.OP_CREATE), records)
+
     def test_body_tombstone_starts_at_the_retried_destroy_ack(self):
         self.prepare_player_target()
         self.send(100)

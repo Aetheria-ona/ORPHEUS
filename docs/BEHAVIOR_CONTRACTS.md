@@ -53,6 +53,11 @@ The tables list selected fixtures. The [fixture directory](../fixtures/behavior/
 | [assembly-hero-selection-v1.json](../fixtures/behavior/assembly-hero-selection-v1.json) | First confirmation, Change Hero request, and reselection before the assembly countdown expires | `tests.public.test_assembly_hero_selection_contract` | Pending Rust coverage |
 | [ffa-wheel-chat-v1.json](../fixtures/behavior/ffa-wheel-chat-v1.json) | Native wheel chat action and localization variables delivered to the sender's controller in free-for-all | `tests.public.test_ffa_wheel_chat_contract` | Pending Rust coverage |
 | [custom-match-presentation-v1.json](../fixtures/behavior/custom-match-presentation-v1.json) | Native custom game subtitles and team objectives during loading and hero select | `tests.public.test_custom_match_presentation_contract` | Pending Rust coverage |
+| [spawn-sector-v1.json](../fixtures/behavior/spawn-sector-v1.json) | Reconstructed horizontal spawn sector, projected center, zero-axis fallback and independent wall/floor rejection | `tests.public.test_spawn_sector_contract` | Pending Rust coverage |
+| [patrol-victim-velocity-v1.json](../fixtures/behavior/patrol-victim-velocity-v1.json) | Floor-following patrol stops for the next tick on a live victim PlayScript channel-0 velocity reset | `tests.public.test_patrol_victim_velocity` | Pending Rust coverage |
+| [owner-first-command-anchor-v1.json](../fixtures/behavior/owner-first-command-anchor-v1.json) | Initial owner command admission anchored to body-script frame when no command history exists | `tests.public.test_behavior_contracts` | Covered in `rust` (`game_replication::tests`) |
+
+The spawn sampler starts at the floor below the requested center and interprets its half-angle in the horizontal request frame. A direction with no horizontal component uses +X. Its first angular probe is at the negative edge, which the reconstruction includes when the path is supported and clear. The fixture exercises this geometry directly. The authored script path normalizes the direction and rounds the full degree angle to a float32 half-angle in radians, so an authored 90-degree request and a direct binary64 `pi / 4` request have different numeric boundaries. Retail candidate coordinates remain unverified.
 
 Run the public contract test modules locally without runtime data:
 

@@ -22,7 +22,12 @@ def load_tool(name: str):
 ssq = load_tool("ssq")
 
 
-INDEX = ssq.load_index()
+INDEX: dict
+
+
+def setUpModule():
+    global INDEX
+    INDEX = ssq.load_index()
 
 
 def run(*argv: str) -> list[str]:
@@ -162,11 +167,18 @@ class GraphFacts(unittest.TestCase):
     def test_sprint_movement_mods(self):
         # Sprint (0255) state 0 "speed add 0.5" (a dynamic config var, 0.5 from the VM), state 20 "crouch
         # intent set 0" (mover mod index 0 = speed, 21 = crouch intent).
-        state0 = run("show", "0255", "--state", "0", "--depth", "0")
-        self.assertIn("rid2 st0 MovementMod (remote 0)", state0)
-        self.assertIn("    m_BC5E91CF=[STU_4CB0950F{m_A9561CA0=0, m_9B7A63EA=#1002}]", state0)
-        state20 = run("show", "0255", "--state", "20", "--depth", "0")
-        self.assertIn("    m_BC5E91CF=[STU_56DEE1BB{m_A9561CA0=21, m_9B7A63EA=0}]", state20)
+        for state, node, modifier, index, operand in (
+            ("0", "rid2 st0 MovementMod (remote 0)", "STU_4CB0950F", "0", "#1002"),
+            ("20", "rid37 st20 MovementMod (remote 10)", "STU_56DEE1BB", "21", "0"),
+        ):
+            with self.subTest(state=state):
+                lines = run("show", "0255", "--state", state, "--depth", "0")
+                self.assertIn(node, lines)
+                payload = lines[lines.index(node) + 1]
+                match = re.fullmatch(r"    m_BC5E91CF=\[(\w+)\{([^{}]+)\}\]", payload)
+                self.assertIsNotNone(match, payload)
+                self.assertEqual(match[1], modifier)
+                self.assertCountEqual(match[2].split(", "), (f"m_A9561CA0={index}", f"m_9B7A63EA={operand}"))
         self.assertIn("  0255 rid3 ActionSetVar  m_out_Var = 0.5", run("var", "1002", "--graph", "0255"))
 
     def test_movement_mod_count(self):

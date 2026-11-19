@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "case_id": "spawn-sector.synthetic-reconstruction.v1",
+  "target_build": 104319,
+  "source": {
+    "revision": "1871ef6082d4906202f9786aa2bd3d4c75b3ab6d",
+    "paths": ["src/ow174/game/npc_navigation.py", "src/ow174/game/script/nodes.py"],
+    "note": "Geometric invariants of the reconstructed sampler. No recorded retail candidate coordinates."
+  },
+  "evidence": "synthetic-reconstruction",
+  "client_acceptance": "pending",
+  "input": {
+    "radius": 4,
+    "max_candidates": 8,
+    "mover": {"stand_radius": 0.25, "stand_height": 1.5, "step_down": 0.5, "max_slope": 45},
+    "floor_y": 2,
+    "zero_width_cases": [
+      {"center": [0, 2.25, 0], "direction": [0, 0, 4]},
+      {"center": [0, 2.25, 0], "direction": [0, 0, -4]},
+      {"center": [0, 2.25, 0], "direction": [-2, 0, 0]},
+      {"center": [0.5, 2.25, -1.5], "direction": [0, 1, 0]}
+    ],
+    "direct_half_angles_degrees": [30, 45, 60],
+    "wall_z": 2,
+    "floor_end_z": 1.5
+  },
+  "expected": {
+    "first_zero_width_points": [[0, 2, 1], [0, 2, -1], [-1, 2, 0], [1.5, 2, -1.5]],
+    "first_probe_against_45_degree_cone": ["inside", "within_closed_cone", "outside"]
+  }
+}

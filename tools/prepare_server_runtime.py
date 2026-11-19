@@ -73,7 +73,7 @@ def prepare(
         inputs[f"data/{ULT_CHARGE_OVERRIDE}"] = charge_override
     for name in (EMOTE_ALIAS_DATA, EMOTE_BLEND_TREE_DATA, EMOTE_CLIP_DATA, EMOTE_DURATION_DATA,
                  EMOTE_SCALAR_DATA, EMOTE_TAGGED_DATA, GREETING_DURATION_DATA, PLAYER_VOICE_DATA,
-                 VOICE_EFFECT_DATA):
+                 VOICE_EFFECT_DATA, "statescript_names_174.json", "extracted_events_174.json"):
         metadata = source / "data" / name
         if metadata.is_file():
             inputs[f"data/{name}"] = metadata
@@ -203,7 +203,7 @@ def _write_runtime(destination: Path, inputs: dict[str, Path]) -> None:
             manifest[name] = hashlib.file_digest(handle, "sha256").hexdigest()
     (destination / "manifest.json").write_text(
         json.dumps({"schema": "orpheus-runtime-copy-v1", "sha256": manifest}, indent=2) + "\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
 
 

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "case_id": "patrol-victim-velocity.synthetic.v1",
+  "target_build": 104319,
+  "source": "Python main 16313e8e + grounded target PlayScript delivery and stock patrol controller",
+  "evidence": "synthetic-reference",
+  "client_acceptance": "pending",
+  "input": {
+    "arrival_tick": 20
+  },
+  "cases": [
+    {
+      "id": "magnitude-zero",
+      "recipient": "live",
+      "channel": 0,
+      "magnitude": 0,
+      "stop_tick": 21,
+      "moves_next": false,
+      "moves_again": true
+    },
+    {
+      "id": "nonzero-magnitude",
+      "recipient": "live",
+      "channel": 0,
+      "magnitude": 4,
+      "stop_tick": null,
+      "moves_next": true,
+      "moves_again": true
+    },
+    {
+      "id": "other-channel",
+      "recipient": "live",
+      "channel": 2,
+      "magnitude": 0,
+      "stop_tick": null,
+      "moves_next": true,
+      "moves_again": true
+    },
+    {
+      "id": "same-id-replacement",
+      "recipient": "replaced",
+      "channel": 0,
+      "magnitude": 0,
+      "stop_tick": null,
+      "moves_next": true,
+      "moves_again": true
+    },
+    {
+      "id": "retired",
+      "recipient": "dead",
+      "channel": 0,
+      "magnitude": 0,
+      "stop_tick": null,
+      "moves_next": false,
+      "moves_again": false
+    }
+  ]
+}

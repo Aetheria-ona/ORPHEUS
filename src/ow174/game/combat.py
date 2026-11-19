@@ -1427,11 +1427,17 @@ class Combat:
                 continue
             script = bot.body_script
             controlled = npc_control.manual(bot)
-            if ((not bot.firing and not controlled) or bot.dead
-                    or not isinstance(script, BotScript) or script.frame > tick):
+            if (bot.dead or not isinstance(script, BotScript) or script.frame > tick
+                    or not (bot.firing or controlled or script.receiving_play)):
                 continue
             try:
-                allowed = npc_control.update_input(self, bot) if controlled else not self.is_stunned(bot)
+                if script.receiving_play:
+                    script.sample_patrol(bot, tick)
+                allowed = (
+                    npc_control.update_input(self, bot)
+                    if controlled
+                    else bot.firing and not self.is_stunned(bot)
+                )
                 snapshot = script.advance_live(tick, bot.position)
                 shots, script.component.shots[:] = list(script.component.shots), []
                 for state, number, time, activation in shots:

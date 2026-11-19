@@ -1,5 +1,7 @@
 """Generate missing client-derived inputs while retaining authorized source files."""
 
+import gzip
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -36,6 +38,36 @@ class RuntimeGenerationTests(unittest.TestCase):
         self.tool = self.folder / "DataTool.exe"
         self.tool.touch()
         self.destination = self.folder / "runtime"
+
+    def test_optional_analysis_tables_are_copied_and_fingerprinted_when_present(self):
+        cache = self.source / "cache" / "collision"
+        cache.mkdir(parents=True)
+        (cache / "0688.col").write_bytes(b"synthetic movement geometry")
+        names = "statescript_names_174.json"
+        events = "extracted_events_174.json"
+        contents = {names: b'{"variables":{}}', events: b'{"events":[]}'}
+        (self.data / "scratch.json").write_bytes(b"unrelated local input")
+        for index, available in enumerate(((), (names,), (events,), (names, events))):
+            with self.subTest(available=available):
+                for name, content in contents.items():
+                    path = self.data / name
+                    if name in available:
+                        path.write_bytes(content)
+                    else:
+                        path.unlink(missing_ok=True)
+                dest = self.folder / f"pack-{index}"
+                prepare(self.source, dest, ["0688"])
+                encoded = (dest / "manifest.json").read_bytes()
+                self.assertNotIn(b"\r", encoded)
+                manifest = json.loads(encoded)["sha256"]
+                for name in (*contents, "scratch.json"):
+                    output = dest / "data" / name
+                    if name in available:
+                        self.assertEqual(output.read_bytes(), contents[name])
+                        self.assertEqual(manifest[f"data/{name}"], hashlib.sha256(contents[name]).hexdigest())
+                    else:
+                        self.assertFalse(output.exists())
+                        self.assertNotIn(f"data/{name}", manifest)
 
     def test_generates_missing_data_and_collision_preserving_prepared_files(self):
         missing = (
@@ -123,6 +155,10 @@ class RuntimeGenerationTests(unittest.TestCase):
             )
 
         data = self.destination / "data"
+        for name in ("game_maps_174.json", "game_heroes_174.json", "ai_spawners_174.json",
+                     "collision_keys_174.json", "arcade_cards_174.json", "game_queues_174.json"):
+            with self.subTest(generated_table=name):
+                self.assertNotIn(b"\r", (data / name).read_bytes())
         heroes = json.loads((data / "game_heroes_174.json").read_text(encoding="utf-8"))
         self.assertEqual(
             list(heroes.values()), [{"name": "Fixture", "class": "", "body": "0x04000000000003CF"}],
@@ -139,6 +175,78 @@ class RuntimeGenerationTests(unittest.TestCase):
         cache = self.destination / "collision" / "0688.col"
         self.assertEqual(cache.read_bytes(), b"generated collision fixture")
         self.assertFalse(any((self.data / name).exists() for name in missing))
+
+    def test_generated_graphs_follow_only_the_selected_maps_placements_and_bodies(self):
+        (self.data / "game_graphs_174.json.gz").unlink()
+        cache = self.source / "cache" / "collision"
+        cache.mkdir(parents=True)
+        for map_id in (1, 2, 3):
+            (cache / f"{map_id:04X}.col").write_bytes(b"prepared geometry")
+        xml = self.folder / "xml"
+        for folder in ("003", "01B"):
+            (xml / folder).mkdir(parents=True)
+        (self.data / "game_heroes_174.json").write_text(json.dumps({
+            "player": {"name": "Player", "body": "0x0400000000000011"},
+        }), encoding="utf-8")
+        body_ids = {"npc": 0x12, "other": 0x13, "second": 0x14}
+        heroes = {name: {"body": f"0x0400{body:012X}"} for name, body in body_ids.items()}
+        maps = {
+            "0x0800000000000001": {"spawners": [{"hero": "npc", "graphs": ["0x0580000000000022"]}]},
+            "0x0800000000000002": {"spawners": [
+                {"hero": "npc", "identifier": "gated", "graphs": ["0x0580000000000023"]},
+                {"hero": "second", "graphs": []},
+                {"hero": "unresolved", "graphs": []},
+            ]},
+            "0x0800000000000003": {"spawners": [{"hero": "other", "graphs": ["0x0580000000000024"]}]},
+        }
+        spawners = self.data / "ai_spawners_174.json"
+        spawners.write_text(json.dumps({"heroes": heroes, "maps": maps}), encoding="utf-8")
+        ns = 'xmlns:dragon="https://yretenai.com/dragonml/v1"'
+        (xml / "003" / "000000000011.003.xml").write_text("<STUEntityDefinition/>", encoding="utf-8")
+        second_body = xml / "003" / "000000000014.003.xml"
+        second_body.write_text("<STUEntityDefinition/>", encoding="utf-8")
+        (xml / "003" / "000000000012.003.xml").write_text(f"""
+          <STUEntityDefinition {ns}>
+            <STUStatescriptComponent>
+              <dragon:array dragon:name="m_B634821A">
+                <GraphDefinition><dragon:ref dragon:name="m_graph" GUID="000000000021.01B"/></GraphDefinition>
+              </dragon:array>
+            </STUStatescriptComponent>
+          </STUEntityDefinition>""", encoding="utf-8")
+        for index in (0x21, 0x22, 0x25):
+            (xml / "01B" / f"{index:012X}.01B.xml").write_text("<STUStatescript/>", encoding="utf-8")
+        (xml / "01B" / "000000000023.01B.xml").write_text(
+            f'<STUStatescript {ns}>'
+            '<dragon:ref dragon:name="child" GUID="000000000025.01B"/></STUStatescript>',
+            encoding="utf-8",
+        )
+        with patch("tools.extract_game_graphs.ROOT_GRAPHS", {}):
+            prepare(self.source, self.destination, ["0001", "0002"], client_xml=xml, owlib=self.folder)
+        encoded = (self.destination / "data/game_graphs_174.json.gz").read_bytes()
+        self.assertEqual(encoded[3], 0)  # no filename or other optional gzip fields
+        self.assertEqual(encoded[4:8], bytes(4))  # timestamp
+        self.assertEqual(encoded[9], 255)  # unspecified operating system
+        bundle = json.loads(gzip.decompress(encoded))
+        self.assertEqual(set(bundle["bodies"]), {"0x0400000000000011"})
+        self.assertEqual(set(bundle["entities"]), {"0x0400000000000012", "0x0400000000000014"})
+        self.assertEqual(bundle["roots"]["graphs"], [0x22, 0x23])
+        self.assertEqual([g["index"] for g in bundle["graphs"]], [0x21, 0x22, 0x23, 0x25])
+        self.assertEqual(bundle["missing"], [])
+        second_body.unlink()
+        with self.assertRaisesRegex(ValueError, r"Missing map spawner body XML: 000000000014\.003\.xml"):
+            prepare(self.source, self.folder / "incomplete", ["0002"], client_xml=xml, owlib=self.folder)
+        self.assertFalse((self.folder / "incomplete").exists())
+
+    def test_explicit_graph_bundle_is_copied_without_reading_spawner_xml(self):
+        cache = self.source / "cache" / "collision"
+        cache.mkdir(parents=True)
+        (cache / "0001.col").write_bytes(b"prepared geometry")
+        override = self.folder / "explicit.json.gz"
+        override.write_bytes(gzip.compress(b'{"version":1,"graphs":[]}'))
+        prepare(self.source, self.destination, ["0001"], game_graphs=override,
+                client_xml=self.folder / "unused-xml", owlib=self.folder)
+        result = self.destination / "data/game_graphs_174.json.gz"
+        self.assertEqual(result.read_bytes(), override.read_bytes())
 
     def test_missing_prepared_inputs_fail_before_generation(self):
         (self.data / "retail_templates.json").unlink()

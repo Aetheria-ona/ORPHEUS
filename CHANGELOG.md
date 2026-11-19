@@ -18,6 +18,26 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ### 2026-11-18
 
+- Mirror the synthetic [owner-first-command-anchor-v1](fixtures/behavior/owner-first-command-anchor-v1.json) contract in `tests/public/test_behavior_contracts.py` against `CommandQueue.before_limit`, keeping Python and Rust first-command admission aligned across fresh body scripts and existing input history.
+
+- Stop floor-following Practice Range bot patrols for the next tick when a live victim PlayScript requests a channel-0 velocity reset (`STU_FF3471E9` magnitude 0), ignoring stale, replaced, or dead recipients, and add the synthetic [patrol-victim-velocity-v1](fixtures/behavior/patrol-victim-velocity-v1.json) contract (#37). Upward launch impulse and original-client verification remain open.
+
+- Preserve optional StateScript names and event metadata when preparing a local runtime pack. ORPHEUS-generated JSON tables and manifests now use LF on Windows and Linux. Generated graph bundles omit the host OS, filename and timestamp from their identifying metadata.
+- Add a loopback Practice Range benchmark for 1, 2, 4 or 8 simulated players. Record per-tick CPU and wall times, skipped simulation frames and which offered inputs the server actually accepted. The [worker performance report](docs/PERFORMANCE.md) records six eight-second windows on Windows, including independent one- and two-player repeats.
+
+- Rotate spawn probes in the request's horizontal frame. Zero-width sectors stay on their axis, and the closed cone, floor and wall checks have a synthetic cross-platform fixture. Retail NPC spawn placement remains unverified.
+- When generating gameplay graphs from local XML, include the selected maps' spawner body definitions, AI associations and placed script roots. On a local 104319 Practice Range pack this gave all 15 training bots their body scripts and delivered their nameplate presenters on first spawn and respawn. Visible overhead health bars still require original-client verification.
+
+- Add a prepared-runtime test runner with private logs, manifest fingerprints, platform-specific failure baselines and a limit on skipped tests.
+- Restore nine entity lifecycle tests that stopped before their assertions when the test match lacked the optional scene host. The prepared suite now checks create acknowledgements, retries and entity ID reuse with an ordinary match's initial scene-host state.
+- StateScript queries and the remix event catalog test now read metadata from the selected runtime pack. The StateScript query cache distinguishes packs, and test discovery can list query tests before loading their index.
+- Check the gallery NPC additions in the login and live hero catalogs while preserving the historical message digests and ordering for all five lobby profiles.
+- Restore prepared Deadeye aim and cleanup checks by verifying the registered effect instance. Exercise objective messages on the listener attached by body startup. The checks detect an effect left alive after target exit and duplicate objective delivery.
+- Verify both Sprint movement modifiers and their operands across runtime packs that serialize the same object fields in different orders.
+- Verify Doomfist's recorded jump and Slam commands on a ledge and above continuous ground. Replay checks the movement sample and the ability phase selected by each terrain.
+- Document the November 19 default branch change to `rust` and how contributors can continue opening Python pull requests against `main`.
+- Add a tag-specific verification form and a revision-pinned Soldier parity matrix. Record the kill-feed and combat HUD observations separately in the Python status notes.
+
 - Clarify which branch to use for Python playtests and Rust migration. The status and contract guides now link the completed cross-language coverage work and distinguish earlier client observations from the next playtest.
 
 - Send the four equipped spray slots in the controller possession update and clear empty slots on hero switch. When the server receives a confirmed spray, use the command pose associated with the first packet and apply the original 104319 eye spring offset. Reuse that frame through reliable retries and fall back to the current pose if the history entry is unavailable.

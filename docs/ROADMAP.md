@@ -1,6 +1,7 @@
 # Restoration Roadmap
 
 Target build: **Overwatch 1 retail 1.74.0.0.104319**.
+See [Python and Rust gameplay parity](PARITY.md) for per-behavior evidence and the next Soldier verification scenarios.
 For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHANGELOG.md). For active tasks see [GitHub Issues](https://github.com/leafall903/ORPHEUS/issues).
 
 ---
@@ -15,7 +16,7 @@ For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHAN
 | **M3 · Single-Player Combat** | Hit/miss/kill/respawn, overhead HP, elimination banner & kill feed | Server combat/respawn works; bot HP bar (#7), kill feed name (#8), headshot sound (#9) open. |
 | **M4 · Two-Client Combat** | Synchronized movement, LOS, combat, and respawn across two clients | Collision movement & loopback checks pass; two-client original-client session pending. |
 | **M5 · Modes & Heroes** | Full match lifecycle, objectives, and abilities across supported heroes | Practice Range, Tutorial & 47 PvE cards enter cleanly; Doomfist/Wrecking Ball/McCree partial. |
-| **M6 · Reliability & Release** | Tick latency budgets, fault isolation, clean Windows deployment | Server-only startup & packet budget guards pass; multi-client latency measurements open. |
+| **M6 · Reliability & Release** | Tick latency budgets, fault isolation, clean Windows deployment | Server-only startup & packet budget guards pass; [loopback worker measurements](PERFORMANCE.md) track server timing; multi-client playtest latency remains open. |
 
 ---
 
@@ -51,7 +52,7 @@ For completed test runs see [docs/STATE.md](STATE.md) and [CHANGELOG.md](../CHAN
 - [ ] **Lobby, Accounts & Communication Wheel:** login, hero select, skin equip, persisted settings (`22200`–`22204`), equipped voice lines, sprays, and emotes (Mercy Relax/Flurry weapon & 3P camera verified on 104319; displacement emotes like 「有胆就来」 still need root-motion work).
 - [x] **Private custom room basics:** original client verified creation, team switching, map preview, map loading and return to the room.
 - [ ] **Custom matches:** verify remaining lobby and hero selection presentation, shared room admission, and Escort gates, pickup and full round flow.
-- [ ] **Network Synchronization:** reliable body creates/retirements, packet budget trimming, and uint32 command rollover guards pass headless loopback tests; preventing recycled body IDs from receiving stale combat notices (#12) remains open.
+- [ ] **Network Synchronization:** headless tests cover reliable body creation and retirement, packet budget trimming, and uint32 command rollover. Prepared loopback tests also verify body ID reuse after lost hits, destroy retries, and ID exhaustion ([#12](https://github.com/leafall903/ORPHEUS/issues/12)). Multiplayer client acceptance is tracked separately.
 - [ ] **Maps & Environment:** static collision caches built, but Practice Range out-of-bounds death plane / respawn (#13) and dynamic player-vs-player collision blocking remain open.
 - [ ] **HUD, Audio & Kill Feed:** enemy bot overhead HP bars (#7), localized bot names in kill feed (#8), headshot audio (#9), Athena multikill audio (#10), and bot death voice listeners (#11) remain open.
 
