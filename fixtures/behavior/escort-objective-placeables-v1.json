@@ -2,13 +2,18 @@
   "schema_version": 1,
   "case_id": "escort-objective-placeables-v1",
   "target_build": 104319,
-  "source": "Synthetic placements and late viewer state exercising the Escort opening world and completed assembly countdown.",
+  "source": "Synthetic placements, active spawn candidates and late viewer state for Escort.",
   "evidence": "synthetic-reference",
   "client_acceptance": "pending",
   "input": {
     "map": "0x0800000000CAFE01",
     "escort_mode": "0x0230000000000015",
     "other_mode": "0x0230000000000010",
+    "spawn_candidates": {
+      "placeables": [10, 20, 30],
+      "initial": [[0, 10], [1, 20]],
+      "later": [[0, 30], [0, 40], [0, null]]
+    },
     "catalog": {
       "name": "Test Escort",
       "modes": ["0x0230000000000015", "0x0230000000000010"],
@@ -39,6 +44,12 @@
     "old_catalog_escort_placeables": [10, 11, 20, 21],
     "other_placeables": [20, 30],
     "legacy_placeables": [10, 20],
+    "spawn_candidates": {
+      "variable": "0x8006",
+      "initial": [[2147483658], [2147483668]],
+      "later": [[2147483678], [2147483668]],
+      "world": [2147483658, 2147483668, 2147483678]
+    },
     "late_viewer": {"countdown_var": 1303, "seconds": 0.0, "select_open_with_hero": false}
   }
 }

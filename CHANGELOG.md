@@ -4,6 +4,16 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-21
+
+#### Custom objective modes
+
+- Run a full single round of Assault and Hybrid, from assembly and setup through capture, overtime, and results. Restore the native objective HUD, world waypoints, and spawn progression, including the transition from point A to the payload in Hybrid.
+- Restore multi-round Control with authored submaps, capture and scoring overrides, fixed-point selection, a configurable score to win, spawn-room healing, and the native round and match presentation.
+- Apply the custom payload speed setting, follow authored route stops and automatic passages, and update gate collision and rubble as the cart advances. Preserve the map-loading spawn entities and update the active hero-selection spawn lists as checkpoints change.
+- Refresh the reached checkpoint markers after an acknowledged team change without affecting other players. Verified on Gibraltar with the original 104319 client.
+- Restore team-relative match announcements, countdowns, and objective audio. Show tenths on objective clocks for the last ten seconds.
+
 ### 2026-11-20
 
 #### Custom Escort

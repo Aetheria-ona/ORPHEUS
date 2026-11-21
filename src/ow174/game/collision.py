@@ -712,7 +712,14 @@ class World(_TriangleScene):
         if moving_ground is None:
             return static
         moving = moving_ground(x, z, top, bottom, category)
-        return moving if moving is not None and (static is None or moving.y > static.y) else static
+        # Decorative faces marked NOT_GROUND can sit above a spawn door's
+        # walkable face. They should not hide actual support from the probe.
+        if moving is not None and (
+            static is None or moving.y > static.y
+            or (static.surface & NOT_GROUND and not moving.surface & NOT_GROUND)
+        ):
+            return moving
+        return static
 
     def static_sphere_cast(self, start, end, radius: float, category: int) -> StaticSweepHit | None:
         """Sweep against the static scene. Radius zero uses the expanded ray geometry when present."""

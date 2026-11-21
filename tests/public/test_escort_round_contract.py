@@ -1,6 +1,7 @@
 import json
 import math
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -25,7 +26,7 @@ class EscortRoundContractTests(unittest.TestCase):
             content.EscortRailPoint((28.0, 0.0, 0.0), line, goals[1]),
             content.EscortRailPoint((42.0, 0.0, 0.0), checkpoint=goals[2]),
         )
-        self.round = escort.EscortRound(content.EscortMap(
+        self.scene = content.EscortMap(
             self.request["placement"], rail, (), tuple(self.request["stage_seconds"]),
             room_placeables=tuple(
                 content.EscortRoomPlacement(
@@ -40,7 +41,8 @@ class EscortRoundContractTests(unittest.TestCase):
                 )
                 for row in self.request["room_placeables"]
             ),
-        ))
+        )
+        self.round = escort.EscortRound(self.scene)
 
     def test_push_through_both_checkpoints_and_finish_once(self):
         mode = self.round
@@ -86,7 +88,7 @@ class EscortRoundContractTests(unittest.TestCase):
                 mode.advance(start + step["seconds"], [
                     *((body, escort.ATTACKERS, position) for body in attackers),
                     *((body, escort.DEFENDERS, position) for body in defenders),
-                    (301, escort.ATTACKERS, (x + 6, y, z)),
+                    (301, escort.ATTACKERS, (x + self.request["pushing_range"]["outside"], y, z)),
                     (302, escort.DEFENDERS, (x, y + 5, z)),
                 ])
                 cart = mode.payload_state()
@@ -102,6 +104,9 @@ class EscortRoundContractTests(unittest.TestCase):
                 ):
                     cart.frame(previous)
                 (instance,), entity_vars, _ = write.call_args.args
+                if previous is None:
+                    self.assertEqual(instance.vars[escort.PAYLOAD_CHECKPOINT_OFFSET],
+                                     (hud["checkpoint_offset"], ()))
                 for values, key, attribute, expected in (
                     (entity_vars, direction_key, "direction", wanted["direction"]),
                     (instance.vars, pushers_key, "pushers", tuple(map(expr.Entity, attackers))),
@@ -112,6 +117,116 @@ class EscortRoundContractTests(unittest.TestCase):
                     else:
                         self.assertNotIn(key, values)
                 previous = cart
+
+    def test_checkpoint_rows_can_refresh_without_changing_the_round(self):
+        mode = self.round
+        hud = self.expected["payload_hud"]
+        refresh = hud["checkpoint_refresh"]
+        mode.phase = escort.Phase.ACTIVE
+        mode.stage = refresh["stage"]
+        mode.distance = mode.checkpoints[mode.stage - 1][0]
+        normal = mode.payload_state()
+        cleared = replace(normal, checkpoint_fractions=tuple(refresh["checkpoint_rows_during_refresh"]))
+        self.assertIs(cleared.active, refresh["active_during_refresh"])
+        definition = SimpleNamespace()
+        with (
+            patch.object(escort.graph, "graph", return_value=definition),
+            patch.object(escort, "remote_delta") as wire,
+        ):
+            for previous, current in ((normal, cleared), (cleared, normal)):
+                current.frame(previous)
+                (instance,), entity_vars, _ = wire.call_args.args
+                self.assertEqual(
+                    instance.vars[escort.PAYLOAD_CHECKPOINT_FRACTIONS], (current.checkpoint_fractions, ()),
+                )
+                self.assertNotIn(escort.PAYLOAD_ACTIVE, entity_vars)
+                self.assertNotIn(escort.PAYLOAD_CHECKPOINT_OFFSET, instance.vars)
+                self.assertEqual(entity_vars[escort.CHECKPOINT_INDEX], (refresh["stage"], ()))
+                self.assertEqual(entity_vars[escort.PAYLOAD_DISTANCE], (normal.distance, ()))
+                self.assertEqual(instance.states, {})
+        self.assertEqual(mode.payload_state(), normal)
+
+    def test_push_and_rollback_use_the_configured_speed_and_range(self):
+        mode = escort.EscortRound(self.scene, speed_scale=2.0)
+        mode.start_setup(self.assembly_ends)
+        start = mode.deadline
+        mode.advance(start, ())
+        reach, expected = self.request["pushing_range"], self.expected["pushing_range"]
+        mode.advance(start + 1, [
+            (101, escort.ATTACKERS, (reach["inside"], 0, 0)),
+            (102, escort.DEFENDERS, (reach["outside"], 0, 0)),
+        ])
+        self.assertEqual(mode.pushers, tuple(map(expr.Entity, expected["pushers"])))
+        self.assertFalse(mode.blockers)
+        self.assertAlmostEqual(mode.distance, expected["distance_at_double_speed"])
+        mode.advance(start + 12, ())
+        self.assertAlmostEqual(mode.distance, expected["rollback_after_delay"])
+
+    def test_final_clock_publishes_consecutive_tenths(self):
+        mode = self.round
+        mode.start_setup(self.assembly_ends)
+        mode.advance(mode.deadline, ())
+        samples = self.request["clock_samples"]
+        for sample, expected in zip(samples, self.expected["clock_samples"], strict=True):
+            with self.subTest(remaining=sample):
+                state = mode.mode_state(mode.deadline - sample, self.assembly_ends)
+                self.assertEqual(state.seconds, expected)
+                self.assertEqual(state.entity_vars[escort.HUD_ROUND_DATA][0].get(escort.HUD_CLOCK), expected)
+
+    def test_scripted_route_waits_drives_and_resumes_with_a_new_rollback_floor(self):
+        scripted = self.request["scripted_route"]
+        goals = self.request["checkpoints"]
+        placement = self.request["placement"]
+        times = self.request["stage_seconds"]
+        entry = {
+            "objectives": [{"kind": "payload", "placeable": placement}, *(
+                {"kind": "checkpoint", "objective": stage, "placeable": index, "escort_seconds": seconds}
+                for stage, (index, seconds) in enumerate(zip(goals, times, strict=True))
+            )],
+            "escort_room_placeables": scripted["gates"],
+            "escort_rail": [{"position": [7 * i, 0, 0], "curve": [[0, 0, 0], [0, 0, 0], [7, 0, 0]], **node}
+                            for i, node in enumerate(scripted["nodes"])],
+        }
+        mode = escort.EscortRound(content._escort_map(entry, [placement, *goals]))
+        mode.start_setup(self.assembly_ends)
+        start = mode.deadline
+        mode.advance(start, ())
+        small_gate, auto_gate = [escort.MAP_ENTITY | gate["placeable"] for gate in scripted["gates"]]
+        door = None
+        for step in self.expected["scripted_route"]:
+            now, group = start + step["time"], step["players"]
+            position = mode.movement().position
+            participants = {
+                "attack": [(101, escort.ATTACKERS, position)], "defense": [(102, escort.DEFENDERS, position)],
+                "both": [(101, escort.ATTACKERS, position), (102, escort.DEFENDERS, position)], "none": [],
+            }[group]
+            with self.subTest(time=step["time"]):
+                mode.advance(now, participants)
+                cart = mode.payload_state()
+                door = mode.door_state(auto_gate, now, door)
+                self.assertAlmostEqual(mode.distance, step["distance"])
+                self.assertEqual((mode.stage, len(cart.pushers), cart.direction),
+                                 (step["stage"], step["pushers"], step["direction"]))
+                self.assertTrue(cart.active)
+                if step["time"] == 5:
+                    self.assertTrue(mode.door_open(small_gate))
+                    self.assertFalse(mode.door_passable(small_gate))
+                elif step["time"] == 13:
+                    self.assertEqual(cart.gate_impact_started, now)
+                    self.assertEqual(mode.deadline, start + 80)
+                elif step["time"] == 20:
+                    self.assertEqual(cart.animation, escort.PAYLOAD_AUTO_DRIVE_ANIM)
+                    self.assertEqual(cart.blockers, ())
+                    self.assertFalse(mode.contested)
+                elif step["time"] == 25:
+                    self.assertEqual(door.pose, escort.DoorPose.OPEN)
+                    self.assertIsNone(cart.animation)
+                elif step["time"] == 27:
+                    self.assertEqual(door.pose, escort.DoorPose.CLOSING)
+                    self.assertTrue(mode.door_passable(auto_gate))
+                elif step["time"] == 50:
+                    self.assertEqual(door.pose, escort.DoorPose.CLOSED)
+                    self.assertFalse(mode.door_passable(auto_gate))
 
     def test_overtime_expires_when_attackers_leave_the_cart(self):
         mode = self.round

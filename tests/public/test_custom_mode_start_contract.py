@@ -35,6 +35,34 @@ class CustomModeStartContractTests(unittest.TestCase):
         map_rules["+0xD8"] = [override(100), override(choices["immediate"])]
         self.assertEqual(rules.start_mode(map_rules), choices["immediate"])
 
+    def test_objective_speed_uses_the_selected_map_then_mode_then_defaults(self):
+        case = self.input["payload_speed_rule"]
+        map_speed, mode_speed, default = self.expected["payload_speed_scales"]
+        rules = self.room.rules
+        map_rules, mode_rules = rules.maps[0]["+0x0"], rules.modes[0]
+
+        def override(value):
+            return {"+0x0": value, "+0x4": case["id"], "+0x6": case["type"]}
+
+        for rule_id in (case["id"], self.input["capture_speed_id"]):
+            with self.subTest(rule=rule_id):
+                case = {**case, "id": rule_id}
+                mode_rules["+0xD8"] = []
+                map_rules["+0xD8"] = []
+                self.assertEqual(rules.objective_rate(map_rules, rule_id), default)
+                mode_rules["+0xD8"] = [override(case["mode"])]
+                map_rules["+0xD8"] = [override(case["invalid"])]
+                self.assertEqual(rules.objective_rate(map_rules, rule_id), mode_speed)
+                map_rules["+0xD8"].append(override(case["map"]))
+                self.assertEqual(rules.objective_rate(map_rules, rule_id), map_speed)
+
+    def test_control_score_to_win_uses_integer_setting(self):
+        case = self.input["control_score_to_win"]
+        rules = self.room.rules
+        map_rules = rules.maps[0]["+0x0"]
+        map_rules["+0xD8"] = [{"+0x0": case["rounds"], "+0x4": case["id"], "+0x6": case["type"]}]
+        self.assertEqual(rules.control_settings(map_rules), {"points_to_win": case["rounds"]})
+
     def test_live_start_mode_request_keeps_the_current_match(self):
         room = self.room
         room.match_id = (101, 102)

@@ -173,13 +173,16 @@ class CustomRoomTests(unittest.TestCase):
         mode = room.rules.modes[0]
         start = {"+0x0": inputs["choices"][choice], "+0x4": inputs["setting_id"],
                  "+0x6": inputs["setting_value_type"]}
+        speed_rule = inputs["payload_speed_rule"]
+        speed = {"+0x0": speed_rule["map"], "+0x4": speed_rule["id"], "+0x6": speed_rule["type"]}
+        capture_speed = {**speed, "+0x4": inputs["capture_speed_id"]}
         selected = room.rules.maps[0]
         map_rules = {**selected["+0x0"], "+0xC0": [{"+0x60": team, "+0x61": slots}]}
         self.dispatch(session, self.request, 24008, {
             "+0x78": {
                 **room.rules.options,
                 "+0x0": [{**selected, "+0x0": map_rules}],
-                "+0x18": [{**mode, "+0xD8": [*mode["+0xD8"], start]}],
+                "+0x18": [{**mode, "+0xD8": [*mode["+0xD8"], start, speed, capture_speed]}],
             },
             "+0x3D0": False,
         })
@@ -188,6 +191,12 @@ class CustomRoomTests(unittest.TestCase):
         link, player = run.connect(handoff)
         match = player.match
         self.assertEqual(room.match_id, match.id)
+        self.assertEqual(match.escort.speed_scale, expected["payload_speed_scales"][0])
+        self.assertEqual(match.escort.capture.capture_scale, expected["payload_speed_scales"][0])
+        first_doors = [entity for entity, room in match.escort.doors.items() if (0, 1) in room.rooms
+                       and room.gate_tag is None and not room.payload_unlock]
+        self.assertTrue(first_doors)
+        self.assertTrue(all(match.escort.door_open(entity) for entity in first_doors))
         self.assertIsNone(match.assemble_ends)
         self.assertTrue(player.select_open)
         self.assertEqual(player.team, team)
@@ -238,8 +247,10 @@ class CustomRoomTests(unittest.TestCase):
         for sender in (waiting, assembling):
             node = graph(int(sender["graph"], 16)).state(sender["state"])
             self.assertEqual(node.field("m_gameMessage")["m_gameMessage"], sender["message"])
-        self.assertEqual(mode_ui.graphs[2], phase_graph)
-        self.assertIn((2, waiting["state"]), mode_ui.on())
+        phase_instance = 1 if match.objective_round is not None else 2
+        waiting_hud = 3 if match.objective_round is not None else 4
+        self.assertEqual(mode_ui.graphs[phase_instance], phase_graph)
+        self.assertIn((phase_instance, waiting["state"]), mode_ui.on())
         check_objective()
         self.assertNotIn((0, 1303), mode_ui.vars)
         self.assertIs(mode_ui.vars[0, expected["wait_enabled_variable"]], True)
@@ -247,10 +258,10 @@ class CustomRoomTests(unittest.TestCase):
         presenter_state = expected["wait_presenter_state"]
         presenter = graph(presenter_graph).state(presenter_state)
         self.assertIn(expected["wait_heading"], json.dumps(presenter.field("m_EC32138E")))
-        self.assertEqual(mode_ui.graphs[4], presenter_graph)
-        self.assertEqual(mode_ui.vars[4, 1923], Asset(int(expected["wait_heading_fallback"], 16)))
-        self.assertIs(mode_ui.vars[4, expected["wait_enabled_variable"]], True)
-        self.assertIn((4, presenter_state), mode_ui.on())
+        self.assertEqual(mode_ui.graphs[waiting_hud], presenter_graph)
+        self.assertEqual(mode_ui.vars[waiting_hud, 1923], Asset(int(expected["wait_heading_fallback"], 16)))
+        self.assertIs(mode_ui.vars[waiting_hud, expected["wait_enabled_variable"]], True)
+        self.assertIn((waiting_hud, presenter_state), mode_ui.on())
 
         body = player.body
         action = {"+0x78": inputs["admin_start_mode_action"]}
@@ -268,11 +279,12 @@ class CustomRoomTests(unittest.TestCase):
 
         def countdown_received():
             receive_script(world.GAME_MODE_ENTITY, mode_ui)
-            return 4 not in mode_ui.graphs and mode_ui.vars.get((0, 1303), 0) > 0
+            return waiting_hud not in mode_ui.graphs and mode_ui.vars.get((0, 1303), 0) > 0
 
         run.until(countdown_received)
-        self.assertIn((2, assembling["state"]), mode_ui.on())
-        self.assertNotIn((2, waiting["state"]), mode_ui.on())
+        self.assertTrue(all(not match.escort.door_open(entity) for entity in first_doors))
+        self.assertIn((phase_instance, assembling["state"]), mode_ui.on())
+        self.assertNotIn((phase_instance, waiting["state"]), mode_ui.on())
         check_objective()
         self.assertIs(mode_ui.vars[0, expected["wait_enabled_variable"]], False)
         self.server.matchmaker._send_to_game.assert_called_once()

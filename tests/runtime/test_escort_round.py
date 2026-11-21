@@ -5,7 +5,7 @@ import unittest
 from dataclasses import replace
 from unittest.mock import patch
 
-from ow174.game import collision, combat, contacts, content, escort, statescript, world
+from ow174.game import collision, combat, contacts, content, escort, hybrid, statescript, world
 from ow174.game.bits import BitReader
 from ow174.game.commands import Command
 from ow174.game.match import SEND_EVERY
@@ -18,6 +18,186 @@ GIBRALTAR = 0x0800000000000184
 
 
 class EscortRoundWireTests(unittest.TestCase):
+    def test_team_switch_refreshes_checkpoint_rows_only_after_the_team_update_arrives(self):
+        scene = content.game_map(GIBRALTAR, content.ESCORT_MODE)
+        if scene is None or scene.escort is None or graph.graph(escort.PAYLOAD_GRAPH) is None:
+            self.skipTest("Gibraltar rail and payload graph are required")
+        run = ProtocolHarness()
+        self.addCleanup(run.close)
+        attack, defense = run.server.create_match(
+            replace(scene, custom_start=content.START_IMMEDIATELY),
+            [(1, "Switching", content.SOLDIER, 1, False), (2, "Staying", content.SOLDIER, 0, False)],
+        )
+        link, player = run.connect(attack)
+        other, defender = run.connect(defense)
+        match = player.match
+        mode = match.escort
+        run.until(lambda: player.escort_payload_script.delivered and defender.escort_payload_script.delivered)
+        mode.phase = escort.Phase.ACTIVE
+        mode.last_update = run.now
+        mode.deadline = run.now + 180
+        mode._push(mode.checkpoints[0][0], run.now)
+        self.assertEqual(mode.stage, 1)
+
+        def settled(peer):
+            return (peer.escort_mode_state.stage == 1 and peer.escort_payload_state.active
+                    and not peer.escort_payload_script.data_in_flight and not peer.mode_script.data_in_flight)
+
+        def read_updates(peer, model):
+            changes = []
+            for _, record in peer.records:
+                if record.entity == mode.payload and record.chunk is not None:
+                    frame = model.apply(record)
+                    if frame is not None and 1 in frame.instances:
+                        fraction_update = frame.instances[1].vars
+                        if escort.PAYLOAD_CHECKPOINT_FRACTIONS in fraction_update:
+                            changes.append(model.vars[1, escort.PAYLOAD_CHECKPOINT_FRACTIONS])
+            peer.records.clear()
+            return changes
+
+        run.until(lambda: settled(player) and settled(defender))
+        cart, other_cart = decode.ClientBody(), decode.ClientBody()
+        fractions = read_updates(link, cart)
+        self.assertEqual(len(fractions), 1)
+        self.assertEqual(read_updates(other, other_cart), fractions)
+
+        self.assertTrue(match.move_custom_player(player, escort.DEFENDERS))
+        run.step(12, ack_except=(link,))
+        self.assertIsNotNone(player.escort_hud_team_update)
+        self.assertEqual(read_updates(link, cart), [])
+        run.send(link)
+        run.until(lambda: not player.escort_payload_state.checkpoint_fractions, ack_except=(link,))
+        run.step(12, ack_except=(link,))
+        self.assertEqual(read_updates(link, cart), [()])
+        self.assertTrue(player.escort_payload_script.data_in_flight)
+        self.assertIs(cart.vars[0, escort.PAYLOAD_ACTIVE], True)
+        self.assertEqual(cart.vars[0, escort.CHECKPOINT_INDEX], 1)
+        run.send(link)
+        run.until(lambda: player.escort_payload_state.checkpoint_fractions and settled(player))
+        self.assertEqual(read_updates(link, cart), fractions)
+        self.assertEqual(read_updates(other, other_cart), [])
+        self.assertEqual(mode.stage, 1)
+
+    def test_authored_route_stops_and_automatic_passages(self):
+        for index, mode_id, wait in ((0x2C3, content.ESCORT_MODE, 5.0),
+                                    (0x68D, content.HYBRID_MODE, 10.0),
+                                    (0x7F4, content.HYBRID_MODE, 10.0)):
+            with self.subTest(map=f"{index:04X}"):
+                self._check_authored_route(index, mode_id, wait)
+
+    def _check_authored_route(self, index, mode_id, wait):
+        scene = content.game_map(0x0800000000000000 | index, mode_id)
+        if scene is None or not (scene.hybrid or scene.escort):
+            self.skipTest("Requires local 104319 Escort and Hybrid routes")
+        speed_scale = 1.5
+        mode = (hybrid.HybridRound(scene.hybrid, speed_scale=speed_scale) if scene.hybrid
+                else escort.EscortRound(scene.escort, speed_scale=speed_scale))
+        if scene.hybrid:
+            mode.capture.captured = 1
+        mode.phase, mode.deadline, mode.last_update = escort.Phase.ACTIVE, 900.0, 100.0
+        start, cue = next((distance, point) for distance, point in mode.route_events
+                          if point.auto_drive_to is not None)
+        endpoint = mode.route_distances[cue.auto_drive_to]
+
+        def push_to(distance):
+            for _ in range(200):
+                if mode.distance >= distance:
+                    return
+                position = mode.movement().position
+                mode.advance(mode.last_update + 1, ((101, escort.ATTACKERS, position),))
+            self.fail(f"Payload stopped at {mode.distance:.3f} before {distance:.3f}")
+
+        if scene.hybrid:
+            small_stop, small = mode.route_events[0]
+            push_to(small_stop)
+            self.assertEqual((small.wait_seconds, mode.stage), (7.0, 0))
+            self.assertEqual(mode.route_wait_until, mode.last_update + 7)
+            self.assertEqual(mode.payload_state().pushers, ())
+        client = decode.ClientBody()
+        stream = statescript.Stream(mode.payload)
+        previous = mode.payload_state()
+        client.apply(stream.full_frame(previous.frame(None, now=mode.last_update)))
+
+        def cart_delta():
+            nonlocal previous
+            state = mode.payload_state()
+            stream.delivered = stream.last
+            (record,) = stream.reliable_frames(state.frame(previous, now=mode.last_update), 4096,
+                                                full=False)
+            previous = state
+            return client.apply(record)
+
+        push_to(start)
+        arrived = mode.last_update
+        self.assertEqual(mode.distance, start)
+        self.assertEqual(mode.stage, 1 if scene.hybrid else 2)
+        self.assertEqual(mode.route_wait_until, arrived + wait)
+        frame = cart_delta()
+        self.assertTrue(client.vars[0, escort.PAYLOAD_ACTIVE])
+        self.assertEqual(client.vars[1, escort.PAYLOAD_PUSHERS], ())
+        if scene.hybrid:
+            impact = escort.PAYLOAD_GATE_IMPACT_INSTANCE
+            self.assertEqual(frame.instances[impact].states[0], (True, {"counter": 1, "time": 0}))
+            mode.advance(arrived + 2, ())
+            late = decode.ClientBody()
+            baseline = mode.payload_state().frame(None, now=mode.last_update)
+            late.apply(statescript.Stream(mode.payload).full_frame(baseline))
+            self.assertIn((impact, 0), late.on())
+
+        speed = escort.AUTO_DRIVE_SPEED * speed_scale
+        position = mode.movement().position
+        participants = [(101, escort.ATTACKERS, position), (102, escort.DEFENDERS, position)]
+        mode.advance(arrived + wait + 1, participants)
+        cart_delta()
+        self.assertAlmostEqual(mode.distance, start + speed)
+        self.assertIn((1, escort.PAYLOAD_AUTO_DRIVE_ANIM), client.on())
+        self.assertEqual(client.vars[1, escort.PAYLOAD_PUSHERS], (expr.Entity(101),))
+        self.assertEqual(client.vars[1, escort.PAYLOAD_BLOCKERS], ())
+        self.assertEqual(client.vars[0, escort.PAYLOAD_DIRECTION], 0)
+        if scene.hybrid:
+            self.assertNotIn(escort.PAYLOAD_GATE_IMPACT_INSTANCE, client.instances)
+            rubble, = mode.debris_distances
+            debris_stream = statescript.Stream(rubble)
+            debris_view = decode.ClientBody()
+            intact = mode.door_state(rubble, mode.last_update, None)
+            self.assertEqual(intact.pose, escort.DoorPose.CLOSED)
+            baseline = mode.door_frame(rubble, intact, None, now=mode.last_update)
+            debris_view.apply(debris_stream.full_frame(baseline))
+
+        mode.advance(arrived + wait + (endpoint - start) / speed + 1, ())
+        self.assertEqual(mode.distance, endpoint)
+        self.assertEqual(mode.movement().position, mode._point(endpoint))
+        if scene.hybrid:
+            now = mode.last_update
+            falling = mode.door_state(rubble, now, intact)
+            debris_stream.delivered = debris_stream.last
+            frame = mode.door_frame(rubble, falling, intact, now=now)
+            (record,) = debris_stream.reliable_frames(frame, 4096, full=False)
+            decoded = debris_view.apply(record)
+            self.assertEqual(debris_view.graphs[1], escort.GATE_DEBRIS_PROP_GRAPH)
+            self.assertEqual(decoded.instances[1].states[escort.GATE_DEBRIS_ANIM],
+                             (True, {"counter": 1, "time": 0}))
+            self.assertIn((1, escort.GATE_DEBRIS_ALIAS), debris_view.on())
+            for elapsed, sample in ((1.5, 1500), (4.0, 3000)):
+                now = falling.starts_at + elapsed
+                state = mode.door_state(rubble, now, None)
+                late_view = decode.ClientBody()
+                frame = late_view.apply(statescript.Stream(rubble).full_frame(
+                    mode.door_frame(rubble, state, None, now=now),
+                ))
+                self.assertEqual(frame.instances[1].states[escort.GATE_DEBRIS_ANIM],
+                                 (True, {"counter": 1, "time": sample}))
+                self.assertIn((1, escort.GATE_DEBRIS_ALIAS), late_view.on())
+            debris_stream.delivered = debris_stream.last
+            settled_frame = mode.door_frame(rubble, state, falling, now=now)
+            (record,) = debris_stream.reliable_frames(settled_frame, 4096, full=False)
+            self.assertEqual(debris_view.apply(record).instances[1].states[escort.GATE_DEBRIS_ANIM],
+                             (True, {"counter": 2, "time": 3000}))
+        mode.advance(mode.last_update + 1, ((101, escort.ATTACKERS, mode.movement().position),))
+        self.assertGreater(mode.distance, endpoint)
+        mode.advance(mode.last_update + 20, ())
+        self.assertEqual(mode.distance, endpoint)
+
     def test_gibraltar_rider_moves_the_cart_and_opens_the_first_route_gate(self):
         scene = content.game_map(GIBRALTAR, content.ESCORT_MODE)
         gates = tuple(escort.MAP_ENTITY | index for index in (1289, 1469))
@@ -36,6 +216,24 @@ class EscortRoundWireTests(unittest.TestCase):
         link, player = run.connect(attack)
         match = player.match
         mode = match.escort
+        catalog = content._map_entries()[GIBRALTAR]
+        loading_placeables = catalog["placeables_by_mode"][f"0x{content.ESCORT_MODE:016X}"]
+        required = {escort.MAP_ENTITY | index for index in loading_placeables}
+        run.until(lambda: required <= {
+            record.entity for _, record in link.records if record.op == world.OP_CREATE
+        })
+        spawn_candidates = decode.ClientBody()
+
+        def read_spawn_candidates(stage):
+            run.until(lambda: player.escort_mode_state is not None and player.escort_mode_state.stage == stage
+                      and not player.mode_script.data_in_flight)
+            for _, record in link.records:
+                if record.entity == world.GAME_MODE_ENTITY and record.chunk is not None:
+                    spawn_candidates.apply(record)
+            return spawn_candidates.vars[0, escort.ACTIVE_SPAWNS]
+
+        initial_spawns = read_spawn_candidates(0)
+        self.assertTrue(all(len(team) == 6 for team in initial_spawns))
         spawn_doors = {entity for entity, placement in mode.doors.items()
                        if (0, escort.ATTACKERS) in placement.rooms}
         self.assertTrue(spawn_doors)
@@ -89,6 +287,13 @@ class EscortRoundWireTests(unittest.TestCase):
             run.now += 0.984
             run.step()
         self.assertEqual(mode.stage, 1)
+        new_spawns = read_spawn_candidates(1)
+        for team, old_team in zip(new_spawns, initial_spawns, strict=True):
+            self.assertEqual(len(team), 6)
+            self.assertTrue(set(team).isdisjoint(old_team))
+            self.assertTrue({item.id for item in team} <= required)
+        self.assertFalse(any(record.op == world.OP_DESTROY and record.entity in required
+                             for _, record in link.records))
         run.until(lambda: player.escort_door_states[gates[0]].pose == escort.DoorPose.OPENING
                   and escort.DOOR_OPEN_ANIM in player.escort_door_states[gates[0]].states
                   and not player.escort_door_scripts[gates[0]].data_in_flight)
@@ -107,8 +312,9 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertIs(type(door.vars[1, 0x1B7F]), int)
         self.assertEqual(door.vars[1, 0x1B7F], 1)
         self.assertEqual(player.escort_door_states[gates[1]].pose, escort.DoorPose.CLOSED)
-        self.assertTrue(set(mode.room_collision[gates[0]]).isdisjoint(mode.payload_collision.room_shapes))
-        self.assertEqual(poses, [set(), {(1, 1)}, {(1, 1), (1, 8)}, {(1, 1), (1, 8)}, {(1, 0)}])
+        self.assertTrue(set(mode.room_collision[gates[0]]) <= set(mode.payload_collision.room_shapes))
+        self.assertEqual(poses[:3], [set(), {(1, 1)}, {(1, 1), (1, 8)}])
+        self.assertEqual(poses[-1], {(1, 0)})
         for entity in spawn_doors:
             spawn = decode.ClientBody()
             for _, record in link.records:
@@ -128,6 +334,28 @@ class EscortRoundWireTests(unittest.TestCase):
                          (True, {"counter": 2, "time": 7000}))
         self.assertIs(door.vars[1, 0x02BB], False)
         self.assertIs(door.vars[0, 0x475B], True)
+        self.assertTrue(set(mode.room_collision[gates[0]]).isdisjoint(mode.payload_collision.room_shapes))
+
+        link.records.clear()
+        for _ in range(20):
+            if not mode.door_open(gates[0]):
+                break
+            player.mover.position = mode.movement().position
+            run.now += 0.984
+            run.step()
+        self.assertFalse(mode.door_open(gates[0]))
+        run.until(lambda: player.escort_door_states[gates[0]].pose == escort.DoorPose.CLOSING
+                  and not player.escort_door_scripts[gates[0]].data_in_flight)
+        for _, record in link.records:
+            if record.entity == gates[0] and record.chunk is not None:
+                frame = door.apply(record)
+        self.assertEqual(door.on(), {(1, escort.DOOR_CLOSE_ANIM)})
+        self.assertLess(frame.instances[1].states[escort.DOOR_CLOSE_ANIM][1]["time"], 1000)
+        run.now = player.escort_door_states[gates[0]].ends_at
+        run.send(link)
+        run.until(lambda: player.escort_door_states[gates[0]].pose == escort.DoorPose.CLOSED
+                  and not player.escort_door_scripts[gates[0]].data_in_flight)
+        self.assertTrue(set(mode.room_collision[gates[0]]) <= set(mode.payload_collision.room_shapes))
 
     def test_waiting_hud_is_removed_when_escort_begins_assembly(self):
         scene = content.game_map(GIBRALTAR, content.ESCORT_MODE)
@@ -222,7 +450,7 @@ class EscortRoundWireTests(unittest.TestCase):
                             if (first and phase_update
                                     and phase_update.states.get(escort.MATCH_LIVE) == (True, {})):
                                 self.assertIs(cart_client.vars[0, escort.PAYLOAD_ACTIVE], True)
-                                self.assertIs(cart_client.vars[1, escort.PAYLOAD_ENABLED], True)
+                                self.assertIs(cart_client.vars[1, escort.PAYLOAD_ENABLED], False)
                             mode_actions.setdefault(peer, []).extend(frame.actions)
                             if frame.owner:
                                 progress_frames.setdefault(peer, []).append(frame)
@@ -256,6 +484,7 @@ class EscortRoundWireTests(unittest.TestCase):
             route_length = cart.vars[0, 0x1D9F]
             self.assertAlmostEqual(route_length, mode.length, delta=0.001)
             self.assertEqual(cart.vars[0, 0x1EC7], 1.0)
+            self.assertEqual(cart.vars[1, escort.PAYLOAD_CHECKPOINT_OFFSET], 0)
             fractions = cart.vars[1, 0x1D9E]
             for fraction, (distance, _) in zip(fractions, mode.checkpoints, strict=True):
                 self.assertAlmostEqual(fraction * route_length, distance, delta=0.001)
@@ -355,7 +584,7 @@ class EscortRoundWireTests(unittest.TestCase):
             self.assertTrue(all(binding_frame.instances[1].states[state] == (True, {})
                                 for state in escort.HUD_PROGRESS_BINDINGS))
             self.assertTrue({(1, state) for state in escort.HUD_PROGRESS_BINDINGS} <= client.on())
-        self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], True)
+        self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], False)
         self.assertEqual(cart_ui.vars[1, 0x2934], 0)
         self.assertEqual(cart_ui.vars[1, 0x1A9F], ())
         self.assertEqual(cart_ui.vars[1, 0x1AA0], ())
@@ -403,7 +632,7 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(active_mode.vars[0, 1923], expr.Asset(escort.ACTIVE_HEADING[escort.DEFENDERS]))
         self.assertEqual(len(progress_frames[active_link]), 1)
         self.assertTrue({(1, state) for state in escort.HUD_PROGRESS_BINDINGS} <= active_mode.on())
-        self.assertIs(active_cart.vars[1, escort.PAYLOAD_ENABLED], True)
+        self.assertIs(active_cart.vars[1, escort.PAYLOAD_ENABLED], False)
         self.assertIs(active_cart.vars[0, escort.PAYLOAD_ACTIVE], True)
         check_cart_route(active_cart)
         self.assertEqual([(target, node) for _, target, node in mode_actions[active_link]],
@@ -481,9 +710,17 @@ class EscortRoundWireTests(unittest.TestCase):
             windows.append(mode.deadline - end_before)
             if stage < 3:
                 self.assertEqual(mode_ui.vars[0, escort.CHECKPOINT_INDEX], stage)
+                for ui, cart in ((mode_ui, cart_ui), (late_mode, late_cart)):
+                    offset = cart.vars[1, escort.PAYLOAD_CHECKPOINT_OFFSET]
+                    captured = ui.vars[0, escort.CHECKPOINT_INDEX] - offset
+                    self.assertEqual(captured, stage)
                 self.assertEqual(mode_ui.vars[0, escort.HUD_ROUND_DATA].get(escort.CHECKPOINT_INDEX), stage)
                 self.assertEqual(mode_ui.vars[(1, 10551)], expr.Entity(mode.checkpoints[stage][1]))
-                self.assertEqual(cart_ui.on(), {(1, 17)})
+                self.assertEqual(cart_ui.on(), {(1, escort.PAYLOAD_WAYPOINT)})
+                for waiting_cart in (cart_ui, late_cart):
+                    self.assertEqual(waiting_cart.vars[1, escort.PAYLOAD_PUSHERS], ())
+                    self.assertEqual(waiting_cart.vars[0, escort.PAYLOAD_DIRECTION], 0)
+                self.assertAlmostEqual(mode.distance, mode.checkpoints[stage - 1][0])
                 self.assertNotEqual(player.spawn, first_spawn)
                 self.assertNotEqual(late_player.spawn, late_first_spawn)
         self.assertEqual(windows, [150.0, 90.0, 0.0])
@@ -491,7 +728,7 @@ class EscortRoundWireTests(unittest.TestCase):
         self.assertEqual(mode_ui.vars[(1, 59)], escort.Phase.COMPLETE)
         self.assertEqual(mode_ui.vars[(1, 7525)], escort.ATTACKERS)
         self.assertIn((1, 20), mode_ui.on())  # 0F4A sends the winning team in message 0695
-        self.assertEqual(cart_ui.on(), {(1, 23)})
+        self.assertEqual(cart_ui.on(), {(1, escort.PAYLOAD_RESULT_ANIM)})
         self.assertIs(cart_ui.vars[1, escort.PAYLOAD_ENABLED], True)
         self.assertIs(cart_ui.vars[0, escort.PAYLOAD_ACTIVE], False)
         self.assertEqual(cart_ui.vars[1, 0x1A9F], ())

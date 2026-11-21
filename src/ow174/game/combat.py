@@ -844,7 +844,7 @@ class Combat:
         from ow174.game.match import COUNTDOWN
 
         host = self.match.scene_host
-        if (player.client is not None and self.match.escort is None and not self.match.assembling()
+        if (player.client is not None and self.match.objective_round is None and not self.match.assembling()
                 and not (host and host.client_ready)):
             values = {COUNTDOWN: 0.0} if self.match.assembled else {}
             player.client.queue_mode_frame(mode_frame(
@@ -997,6 +997,7 @@ class Combat:
         if self.match.collision_world is None:
             return
         retained = max(self.tick + 1, tick - COMBAT_CATCH_UP + 1)
+        elapsed = (tick - retained + 1 if self.tick else 1) * TICK
         first = tick
         if self.tick and tick > self.tick + 1 and any(
             bot.firing and not bot.dead and isinstance(bot.body_script, BotScript) for bot in self.match.bots
@@ -1014,6 +1015,8 @@ class Combat:
                     self._fly(rocket)
             self._bot_weapons(at)
         self.projectiles.update(tick, first_tick=retained)
+        if (mode := self.match.control) is not None and mode.healing_rooms:
+            self._heal_spawn_rooms(mode, elapsed)
         self._flush_deadeye_notices()
         self.match.deliver_body_messages()
         if frames:
@@ -1818,6 +1821,16 @@ class Combat:
             if segment_distance(centre, a, b) - target.radius > radius:
                 continue
             self._heal(healer, target, amount)
+
+    def _heal_spawn_rooms(self, mode, elapsed: float) -> None:
+        from ow174.game.control import SPAWN_HEAL_PER_SECOND
+
+        amount = SPAWN_HEAL_PER_SECOND * mode.movement_scale * elapsed
+        for target in self._targets():
+            vitals = self.vitals.get(target.entity)
+            if (vitals is not None and not vitals.dead and mode.in_healing_room(target.team, target.feet)
+                    and vitals.heal(amount) > 0):
+                self._sync_body_health(target.owner, vitals)
 
     def _heal(self, healer, target: Target, amount: float) -> float:
         vitals = self.vitals_of(target)

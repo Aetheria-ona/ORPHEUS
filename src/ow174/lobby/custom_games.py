@@ -1,5 +1,6 @@
 """Private custom game rooms created from the 1.74 game browser."""
 
+import struct
 from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING
@@ -7,6 +8,7 @@ from uuid import uuid4
 
 from ow174.game import collision
 from ow174.game.content import (
+    CONTROL_MODE,
     ESCORT_MODE,
     FREE_FOR_ALL_TEAM,
     PRACTICE_RANGE_MODE,
@@ -44,6 +46,12 @@ RESTART_GAME = 3
 RETURN_TO_LOBBY = 4
 START_GAME_MODE = 5  # Start Game Mode in the in-game custom lobby
 MODE_START_SETTING = 0x25C8  # 0F4A/0EC2 read this identifier as mode entity variable 9672
+CAPTURE_SPEED = 0x252E
+CONTROL_SCORE_SPEED = 0x252F
+PAYLOAD_SPEED = 0x2530
+CONTROL_SCORE_TO_WIN = 0x2295
+CONTROL_VALID_POINTS = 0x2549
+CONTROL_POINT_CHOICES = {0x2576: None, 0x2577: 0, 0x2578: 1, 0x2579: 2}
 RESTARTED_NOTICE = 0x0DE0000000000E3B
 SETTINGS_UPDATED_NOTICE = 0x0DE0000000000E3C
 RETURNED_TO_LOBBY_NOTICE = 0x0DE0000000002B08
@@ -62,7 +70,7 @@ PLAYABLE_MODES = {
     0x0230000000000014: "Assault",
     ESCORT_MODE: "Escort",
     HYBRID: "Hybrid",
-    0x0230000000000017: "Control",
+    CONTROL_MODE: "Control",
     PRACTICE_RANGE_MODE: "Practice Range",
     TEAM_DEATHMATCH_MODE: "Team Deathmatch",
     **FREE_FOR_ALL_MODES,
@@ -71,7 +79,7 @@ MODE_PRESETS = {
     0x0230000000000014: 0x0FD000000000002A,
     ESCORT_MODE: 0x0FD000000000002E,
     HYBRID: 0x0FD000000000002C,
-    0x0230000000000017: 0x0FD0000000000030,
+    CONTROL_MODE: 0x0FD0000000000030,
 }
 TEAM_COUNT = 6
 SPECTATOR_COUNT = 2
@@ -93,16 +101,43 @@ class RoomRules:
     workshop: dict = field(default_factory=dict)
     parts: list[tuple[int, dict]] = field(default_factory=list)
 
-    def start_mode(self, map_rules: dict) -> int:
-        """Use the selected map's override, then its mode's setting or the stock default."""
+    def setting_rows(self, map_rules: dict):
+        """Yield selected-map overrides before the mode defaults from the lobby."""
         mode_rules = next((row for row in self.modes if row["+0xB0"] == map_rules["+0xB0"]), {})
         for rule in (map_rules, mode_rules):
-            for value in rule.get("+0xD8", ()):
-                if value["+0x4"] == MODE_START_SETTING and value["+0x6"] == 3:
-                    setting = value["+0x0"]
-                    if setting in (START_IMMEDIATELY, START_WHEN_FULL, START_MANUALLY):
-                        return setting
+            yield from rule.get("+0xD8", ())
+
+    def start_mode(self, map_rules: dict) -> int:
+        for row in self.setting_rows(map_rules):
+            if (row["+0x4"] == MODE_START_SETTING and row["+0x6"] == 3
+                    and row["+0x0"] in (START_IMMEDIATELY, START_WHEN_FULL, START_MANUALLY)):
+                return row["+0x0"]
         return START_WHEN_FULL
+
+    def control_settings(self, map_rules: dict) -> dict:
+        settings = {}
+        rate_fields = {CAPTURE_SPEED: "capture_scale", CONTROL_SCORE_SPEED: "score_scale"}
+        for row in self.setting_rows(map_rules):
+            key, kind, raw = row["+0x4"], row["+0x6"], row["+0x0"]
+            if key in rate_fields and kind in (1, 2):
+                # The lobby schema carries the numeric union as u32, including the float bits.
+                rate = struct.unpack("<f", struct.pack("<I", raw))[0]
+                if 0.1 <= rate <= 5.0:  # 000C.0C6, both sliders
+                    settings.setdefault(rate_fields[key], rate)
+            elif key == CONTROL_VALID_POINTS and kind == 3 and raw in CONTROL_POINT_CHOICES:
+                settings.setdefault("fixed_stage", CONTROL_POINT_CHOICES[raw])
+            elif key == CONTROL_SCORE_TO_WIN and kind == 1 and 1 <= raw <= 3:  # 000C.0C6 integer slider
+                settings.setdefault("points_to_win", raw)
+        return settings
+
+    def objective_rate(self, map_rules: dict, key: int) -> float:
+        for row in self.setting_rows(map_rules):
+            if row["+0x4"] == key and row["+0x6"] in (1, 2):
+                # Assault, Hybrid and Escort use the same float multiplier range.
+                rate = struct.unpack("<f", struct.pack("<I", row["+0x0"]))[0]
+                if 0.1 <= rate <= 5.0:
+                    return rate
+        return 1.0
 
     def update(self, header: dict, parts: list[tuple[int, dict]]) -> "RoomRules":
         options = dict(header["+0x78"])
@@ -213,6 +248,15 @@ class CustomRoom:
             )
             if scene is not None:
                 start = None if scene.mode_guid == PRACTICE_RANGE_MODE else self.rules.start_mode(rules)
+                if scene.control is not None:
+                    control = replace(scene.control, **self.rules.control_settings(rules))
+                    scene = replace(scene, control=control)
+                if scene.escort is not None or scene.hybrid is not None:
+                    speed = self.rules.objective_rate(rules, PAYLOAD_SPEED)
+                    scene = replace(scene, payload_speed_scale=speed)
+                if scene.assault is not None or scene.hybrid is not None:
+                    speed = self.rules.objective_rate(rules, CAPTURE_SPEED)
+                    scene = replace(scene, capture_speed_scale=speed)
                 return replace(scene, preset_guid=rules.get("+0xA8", 0), custom_start=start), rules
         return None
 

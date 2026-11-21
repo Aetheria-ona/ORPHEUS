@@ -82,23 +82,23 @@ def components(reader):
     return result
 
 
-def entity_record(reader, op):
+def entity_record(reader, update):
     length = reader.bits(14)
     end = reader.pos + length
-    if op == OP_CREATE:
+    if update.op == OP_CREATE:
         if reader.bit():  # a placeable from the map
             reader.bits(32)
             assert not reader.bit()
         else:
-            reader.bits(12 if reader.bit() else 20 if reader.bit() else 32)
+            update.create_definition = reader.bits(12 if reader.bit() else 20 if reader.bit() else 32)
             flags = reader.bits(8)
             if flags & world.WITH_SKIN:
                 assert flags & world.SKIN_THEME
                 reader.bits(33)
             if flags & world.WITH_TRANSFORM:
-                reader.bits(7 * 32)
+                update.create_pose = struct.unpack("<7f", reader.bits(7 * 32).to_bytes(7 * 4, "little"))
             if flags & (world.WITH_TRANSFORM | world.WITH_SCALE):
-                reader.bits(3 * 32)
+                update.create_scale = struct.unpack("<3f", reader.bits(3 * 32).to_bytes(3 * 4, "little"))
             if flags & world.WITH_MOVEMENT:
                 read_movement(reader, world.CREATE_BASE)
     result = components(reader)
@@ -162,7 +162,7 @@ def wire_frame(packet):
             records.append((update, {}))
             continue
         update.op = reader.bits(2)
-        fields = {} if update.op == OP_DESTROY else entity_record(reader, update.op)
+        fields = {} if update.op == OP_DESTROY else entity_record(reader, update)
         assert reader.bit() == 0  # ch5
         records.append((update, fields))
     assert reader.left() < 8 and reader.bits(reader.left()) == 0

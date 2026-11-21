@@ -12,6 +12,18 @@ Variable-width numbers start with selector bits that pick a width. The client us
 import struct
 
 
+def byte_mask(value: int) -> bytes:
+    """A u64 as a mask of its non-zero bytes followed by those bytes, lowest first."""
+    number = int(value) & 0xFFFFFFFFFFFFFFFF
+    data = bytearray(1)
+    for index in range(8):
+        byte = number >> (8 * index) & 0xFF
+        if byte:
+            data[0] |= 1 << index
+            data.append(byte)
+    return bytes(data)
+
+
 class BitWriter:
     def __init__(self) -> None:
         self.value = 0

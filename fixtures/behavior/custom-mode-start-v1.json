@@ -8,12 +8,16 @@
   "input": {
     "setting_id": 9672,
     "setting_value_type": 3,
+    "capture_speed_id": 9518,
+    "control_score_to_win": {"id": 8853, "type": 1, "rounds": 3},
+    "payload_speed_rule": {"id": 9520, "type": 2, "map": 1073741824, "mode": 1056964608, "invalid": 1090519040},
     "room_start_action": 1,
     "admin_start_mode_action": 5,
     "choices": {"full": 9674, "immediate": 9673, "manual": 9675}
   },
   "expected": {
     "default": 9674,
+    "payload_speed_scales": [2.0, 0.5, 1.0],
     "practice_start_automatically": true,
     "spectators_fill_playing_slots": false,
     "wait_heading": "0x0DE0000000007029",
