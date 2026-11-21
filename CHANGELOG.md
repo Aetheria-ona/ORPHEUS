@@ -4,6 +4,10 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 ## Unreleased
 
+### 2026-11-21
+
+- Add portable Linux Proton runtime resolution (`ow174.launcher.proton`) and explicit handle-bound Wine relay injection (`BoundProcess` in `ow174.launcher.inject` and `ow174.launcher.proton_inject`). `resolve_proton_runtime` reads `WINEPREFIX`, `STEAM_COMPAT_TOOL_PATHS` (disambiguated via `/proc/<pid>/maps`), and Wine sync flags (`WINEFSYNC`, `WINEESYNC`, `WINE_NTSYNC`, `PROTON_ENABLE_NTSYNC`, `WINEFUTEX2`) from `--runtime-pid` and fails closed on ambiguity or invalid values. Injection requires explicit `--win-pid`, `--creation-time`, and `--game-exe` (from `--list`) rather than claiming automatic Linux-to-Windows PID matching, and `BoundProcess` retains a single Windows process handle across identity verification, module snapshots, `LoadLibraryW` injection, and exported `worker()` startup without re-opening by PID. Verified with synthetic unit tests, real Windows embeddable Python `-I` helper invocation, an isolated A->B process-replacement check under Proton 10.0 and Proton 11.0, and live Overwatch `1.74.0.0.104319` (`enUS`) client login to the main menu under Proton 10.0, Proton 11.0, Proton Experimental, and Proton Hotfix (`relays=1`, `err=0`).
+
 ### 2026-11-18
 
 - Mirror the synthetic [owner-first-command-anchor-v1](fixtures/behavior/owner-first-command-anchor-v1.json) contract in `tests/public/test_behavior_contracts.py` against `CommandQueue.before_limit`, keeping Python and Rust first-command admission aligned across fresh body scripts and existing input history.
