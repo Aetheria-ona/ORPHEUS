@@ -22,8 +22,9 @@ Read in the client (the chunk reader 0x7FF7898A6450, the frame 0x7FF78991E3C0):
 
 import struct
 from dataclasses import dataclass, field
+from itertools import groupby
 
-from ow174.game.bits import BitWriter
+from ow174.game.bits import BitWriter, byte_mask
 from ow174.game.script import codecs, spray_placement
 from ow174.game.world import EntityUpdate
 
@@ -80,15 +81,21 @@ class Float(Value):
 
 @dataclass(frozen=True)
 class Asset(Value):
-    """A GUID read as an asset (a hero, for example): its type bits and its low 32 bits."""
+    """A GUID or a compact enum identifier, both read as native value type 4."""
 
     guid: int
 
     def write(self, out: BitWriter) -> None:
         out.bits(9, 4)
+        resource_type = self.guid >> 48
+        if self.guid and resource_type == 0:
+            # The typed form with a zero resource type always decodes to zero.
+            out.bit(0)
+            out.raw(byte_mask(self.guid))
+            return
         out.bit(1)
-        out.bits(self.guid >> 48, 16)
-        if self.guid >> 48:
+        out.bits(resource_type, 16)
+        if resource_type:
             out.w_var(self.guid & 0xFFFFFFFF)
 
 
@@ -922,33 +929,35 @@ def owner_delta(
     out.w_var(body.count)  # LBSS: the body up to the "more" bit
     out.append(body)
     out.bit(0)  # no more sub-frames
-    _write_frame_action(out, callout, graphs, owner=True)
+    _write_frame_actions(out, () if callout is None else (callout,), graphs, owner=True)
     return out
 
 
-def _write_frame_action(out: BitWriter, action, graphs: dict, *, owner: bool) -> None:
-    """104319 A0CCA0, one timestamped short action and an empty ungrouped list."""
-    out.bit(action is not None)
-    if action is not None:
-        stamp, target, position = action
-        definition = graphs[target]
-        node = definition.node(position)
-        if node is None or not node.is_action or not node.is_networked or node.remote < 0:
-            raise ValueError("frame action has no networked node")
-        entry = BitWriter()
-        entry.bit(1)  # TrID present
-        entry.w_u16(target)
-        entry.bits(
-            node.rid if owner else node.remote, definition.nodes_bits if owner else definition.remote_bits
-        )
+def _write_frame_actions(out: BitWriter, actions, graphs: dict, *, owner: bool) -> None:
+    """104319 A0CCA0, timestamped short action groups and an empty ungrouped list."""
+    for stamp, group in groupby(actions, key=lambda action: action[0]):
+        entries = BitWriter()
+        for _, target, position in group:
+            definition = graphs[target]
+            node = definition.node(position)
+            if node is None or not node.is_action or not node.is_networked or node.remote < 0:
+                raise ValueError("frame action has no networked node")
+            entry = BitWriter()
+            entry.bit(1)  # TrID present
+            entry.w_u16(target)
+            entry.bits(
+                node.rid if owner else node.remote, definition.nodes_bits if owner else definition.remote_bits
+            )
+            entries.bit(1)
+            entries.bit(0)  # short length and no node payload
+            entries.bits(8 + entry.count, 8)
+            entries.append(entry)
+        out.bit(1)
         out.w_u32(stamp)
-        out.w_var(2 + 8 + entry.count)  # RMSz excludes the group terminator
-        out.bit(1)  # one entry
-        out.bit(0)  # short length and no node payload
-        out.bits(8 + entry.count, 8)
-        out.append(entry)
+        out.w_var(entries.count)  # RMSz excludes the group terminator
+        out.append(entries)
         out.bit(0)  # no more entries
-        out.bit(0)  # no more groups
+    out.bit(0)  # no more groups
     out.bit(0)  # no ungrouped entries
 
 
@@ -995,7 +1004,9 @@ def remote_fields(cls: str, payload: dict) -> dict:
         volleys = get("volleys", 1) & 0xFF
         return {"has_volleys": volleys != 1, "volleys": volleys, "counter": get("counter", 0) & 63}
     if kind == "anim":
-        return {"counter": get("counter", 0) & 7, "has_time": 0}
+        time = get("time")
+        return {"counter": get("counter", 0) & 7, "has_time": time is not None,
+                "time_set": bool(time), "time": time}
     if kind == "chase":
         cur = get("cur", 0.0)
         vector = hasattr(cur, "x")
@@ -1108,6 +1119,7 @@ def remote_delta(
     graphs: dict,
     *,
     callout: tuple[int, int, int] | None = None,
+    callouts: tuple[tuple[int, int, int], ...] = (),
 ) -> BitWriter:
     """A plain (H = 0) delta: the instances that changed, the variables, and per listed instance a mask over
     its raw m_remoteSyncNodes list with the states that changed (item.states by m_states index)."""
@@ -1140,5 +1152,7 @@ def remote_delta(
         mask(out, len(nodes), set(chosen))
         for index in sorted(chosen):
             _remote_state(out, chosen[index], full=False, graphs=graphs)
-    _write_frame_action(out, callout, graphs, owner=False)
+    if callout is not None:
+        callouts = (callout, *callouts)
+    _write_frame_actions(out, callouts, graphs, owner=False)
     return out

@@ -16,7 +16,19 @@ from ow174.game import replay_values
 from ow174.game.collision import CollisionProvider, LoadState
 from ow174.game.collision_fingerprint import WorldRegistry
 from ow174.game.collision_tape import RecordingCollisionProvider, ReplayCollisionProvider
-from ow174.game.content import GameMap, Spawn, heroes
+from ow174.game.content import (
+    AssaultMap,
+    AssaultPoint,
+    ControlMap,
+    ControlPoint,
+    EscortMap,
+    EscortRailPoint,
+    EscortRoomPlacement,
+    GameMap,
+    HybridMap,
+    Spawn,
+    heroes,
+)
 from ow174.game.environment import ExecutionEnvironment
 from ow174.game.environment_tape import RecordingEnvironment, ReplayEnvironment
 from ow174.game.match import RETAIL_QUANTA, no_skin
@@ -72,17 +84,113 @@ def _address(value):
     return value
 
 
-def _game_map(value):
-    _fields(value, {f.name for f in dataclasses.fields(GameMap)}, "GameMap")
-    if type(value["spawns"]) is not tuple:
+def _map_spawn(value):
+    fields = {f.name for f in dataclasses.fields(Spawn)}
+    if type(value) is dict and "placeable" not in value:
+        fields.remove("placeable")
+    _fields(value, fields, "Spawn")
+    if type(value["position"]) is not tuple or len(value["position"]) != 3:
+        raise ServerJournalError("invalid Spawn position")
+    return Spawn(**value)
+
+
+def _spawns(value):
+    if type(value) is not tuple:
         raise ServerJournalError("GameMap spawns must be a tuple")
-    spawns = []
-    for spawn in value["spawns"]:
-        _fields(spawn, {f.name for f in dataclasses.fields(Spawn)}, "Spawn")
-        if type(spawn["position"]) is not tuple or len(spawn["position"]) != 3:
-            raise ServerJournalError("invalid Spawn position")
-        spawns.append(Spawn(**spawn))
-    return GameMap(**{**value, "spawns": tuple(spawns)})
+    return tuple(map(_map_spawn, value))
+
+
+def _map_room(value):
+    fields = {f.name for f in dataclasses.fields(EscortRoomPlacement)}
+    if type(value) is dict:
+        optional = {"placement_definition", "gate_tag", "close_delay", "gate_debris", "restricted_sign",
+                    "debris_rail_node"}
+        fields -= optional - value.keys()
+    _fields(value, fields, "EscortRoomPlacement")
+    return EscortRoomPlacement(**value)
+
+
+def _escort_map(value):
+    if value is None:
+        return None
+    fields = {f.name for f in dataclasses.fields(EscortMap)}
+    if type(value) is dict:
+        fields -= {"room_placeables", "payload_origin", "payload_rotation"} - value.keys()
+    _fields(value, fields, "EscortMap")
+    if type(value["rail"]) is not tuple or type(value["later_spawns"]) is not tuple:
+        raise ServerJournalError("Escort rail and spawn stages must be tuples")
+    rooms = value.get("room_placeables", ())
+    if type(rooms) is not tuple:
+        raise ServerJournalError("Escort room placements must be a tuple")
+    rail = []
+    for row in value["rail"]:
+        fields = {f.name for f in dataclasses.fields(EscortRailPoint)}
+        if type(row) is dict:
+            fields -= {"wait_seconds", "auto_drive_to", "open_gate", "close_gate", "gate_impact"} - row.keys()
+        _fields(row, fields, "EscortRailPoint")
+        rail.append(EscortRailPoint(**row))
+    return EscortMap(**{
+        **value, "rail": tuple(rail), "room_placeables": tuple(map(_map_room, rooms)),
+        "later_spawns": tuple(map(_spawns, value["later_spawns"])),
+    })
+
+
+def _assault_point(value):
+    _fields(value, {f.name for f in dataclasses.fields(AssaultPoint)}, "AssaultPoint")
+    return AssaultPoint(**value)
+
+
+def _assault_map(value):
+    if value is None:
+        return None
+    _fields(value, {f.name for f in dataclasses.fields(AssaultMap)}, "AssaultMap")
+    return AssaultMap(**{
+        **value, "points": tuple(map(_assault_point, value["points"])),
+        "room_placeables": tuple(map(_map_room, value["room_placeables"])),
+        "later_spawns": tuple(map(_spawns, value["later_spawns"])),
+    })
+
+
+def _hybrid_map(value):
+    if value is None:
+        return None
+    if type(value) is dict and "auto_drive" not in value:
+        value = {**value, "auto_drive": False}
+    _fields(value, {f.name for f in dataclasses.fields(HybridMap)}, "HybridMap")
+    route = value["route"]
+    _fields(route, {f.name for f in dataclasses.fields(EscortMap)}, "EscortMap")
+    return HybridMap(**{**value, "point": _assault_point(value["point"]), "route": _escort_map(route)})
+
+
+def _control_map(value):
+    if value is None:
+        return None
+    fields = {f.name for f in dataclasses.fields(ControlMap)}
+    if type(value) is dict:
+        optional = {"healing_rooms", "capture_scale", "score_scale", "fixed_stage", "points_to_win"}
+        fields -= optional - value.keys()
+    _fields(value, fields, "ControlMap")
+    points = []
+    for row in value["points"]:
+        _fields(row, {f.name for f in dataclasses.fields(ControlPoint)}, "ControlPoint")
+        points.append(ControlPoint(**row))
+    return ControlMap(**{
+        **value, "points": tuple(points), "room_placeables": tuple(map(_map_room, value["room_placeables"])),
+        "later_spawns": tuple(map(_spawns, value["later_spawns"])),
+    })
+
+
+def _game_map(value):
+    fields = {f.name for f in dataclasses.fields(GameMap)}
+    if type(value) is dict:
+        fields -= {"custom_start", "escort", "assault", "hybrid", "control",
+                   "payload_speed_scale", "capture_speed_scale"} - value.keys()
+    _fields(value, fields, "GameMap")
+    return GameMap(**{
+        **value, "spawns": _spawns(value["spawns"]),
+        "escort": _escort_map(value.get("escort")), "assault": _assault_map(value.get("assault")),
+        "hybrid": _hybrid_map(value.get("hybrid")), "control": _control_map(value.get("control")),
+    })
 
 
 def _handoffs(value):

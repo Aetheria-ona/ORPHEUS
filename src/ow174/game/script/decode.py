@@ -103,10 +103,11 @@ def read_value(reader: BitReader):
     if tag == 8:
         return f32(reader)
     if tag == 9:
-        if not reader.bit():
-            raise DecodeError("asset mask form")
-        high = reader.bits(16)
-        return expr.Asset(high << 48 | w_var(reader) if high else 0)
+        if reader.bit():
+            high = reader.bits(16)
+            return expr.Asset(high << 48 | w_var(reader) if high else 0)
+        present = reader.bits(8)
+        return expr.Asset(sum(reader.bits(8) << (8 * index) for index in range(8) if present & (1 << index)))
     if tag == 12:
         present = [reader.bit() for _ in range(3)]
         return expr.Vec3(*(f32(reader) if flag else 0.0 for flag in present))

@@ -43,7 +43,7 @@ import math
 import struct
 
 from ow174.game import messages
-from ow174.game.bits import BitWriter
+from ow174.game.bits import BitWriter, byte_mask
 
 OP_CREATE, OP_UPDATE, OP_DESTROY = 1, 2, 3
 GAME_MODE_ENTITY = 0xD0000010
@@ -113,25 +113,13 @@ class RecordWriter(BitWriter):
             self.bits(0, missing)
 
 
-def _byte_mask(value: int) -> bytes:
-    """A u64 as a mask of its non-zero bytes followed by those bytes, the lowest first."""
-    number = int(value) & 0xFFFFFFFFFFFFFFFF
-    mask, body = 0, bytearray()
-    for k in range(8):
-        byte = (number >> (8 * k)) & 0xFF
-        if byte:
-            mask |= 1 << k
-            body.append(byte)
-    return bytes([mask]) + bytes(body)
-
-
 def _write_value(out: RecordWriter, kind: str, value) -> None:
     if kind == "id":
         out.pad()
-        out.raw(_byte_mask(value))
+        out.raw(byte_mask(value))
     elif kind == "dbid":  # (low, high), each a byte mask and its bytes, not padded (0x7FF78A76B500)
         for half in value:
-            out.raw(_byte_mask(half))
+            out.raw(byte_mask(half))
     elif kind == "entity":
         out.raw(struct.pack("<I", int(value) & 0xFFFFFFFF))
     elif kind == "string":  # a teString: on a byte, its u32 byte count and the bytes (0x7FF78AAF0300)
@@ -240,10 +228,13 @@ class Movement:
         spring=(0, 0),
         spring_speed=0.0,
         fall=0.0,
+        *,
+        body_pitch: int = 0,
     ) -> None:
         self.position = tuple(position)
         self.yaw = int(yaw)
         self.pitch = int(pitch)
+        self.body_pitch = int(body_pitch)
         self.velocity = tuple(velocity)
         self.flags = int(flags)
         self.throttles = tuple(throttles)
@@ -396,7 +387,7 @@ def write_movement(
     else:
         out.bit(0)
     _input_fields(out, state, frame)
-    for angle in (state.yaw & 0xFFFF, 0, 0):  # Euler yaw, pitch, roll; widths 8, 10, 16
+    for angle in (state.yaw & 0xFFFF, state.body_pitch & 0xFFFF, 0):  # Euler yaw, pitch, roll
         if angle:
             _selector(out, angle, 2, 16)
         else:
@@ -448,6 +439,7 @@ def create(
     skin: tuple[int, bool] = (0, False),
     *,
     movement_parent: int | None = None,
+    scale: tuple[float, float, float] = (UNIT_ENTITY_SCALE,) * 3,
 ) -> RecordWriter:
     """A create record for an entity of a 003 definition. `skin` is (skin theme GUID, golden weapon);
     theme 0 leaves the definition's own look. `movement_parent` applies when a movement block is present."""
@@ -467,8 +459,8 @@ def create(
         for value in (*position, *rotation):
             out.f32(value)
     if flags & (WITH_TRANSFORM | WITH_SCALE):
-        for _ in range(3):
-            out.f32(UNIT_ENTITY_SCALE)
+        for value in scale:
+            out.f32(value)
     if movement is not None:
         write_movement(out, movement, frame_back, CREATE_BASE, parent=movement_parent)
     _write_components(out, components)

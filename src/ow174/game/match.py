@@ -17,8 +17,8 @@ How a player gets into the world:
   under a new id in the same frame (the client ignores a destroyed id for 30 s).
 - The client then moves the body itself; it never tells the server where it is. The server moves
   a copy from the commands, and that copy is what the other players see.
-- In the PvP modes the first spawn starts "assemble your team": 30 s shown on the hero select
-  screen, which stays open after a pick and closes when the time is up.
+- PvP assembly lasts 30 s. Custom rooms can wait for all player slots or an admin request.
+  While waiting, choosing a hero closes the picker and lets the player enter the map.
 - Every client also gets the other players' entities, as in retail (their team lists, B_team_list
   research): each one's card (20308: name, icon, level), his entity with his id, and a plain frame
   with the team list entry 288D and his pick. 288D leaves enemies out of the list on the client.
@@ -35,7 +35,23 @@ from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING
 
-from ow174.game import bodytrace, bots, combat, correction, heroselect, movelog, notices, pools, stats, world
+from ow174.game import (
+    assault,
+    bodytrace,
+    bots,
+    combat,
+    correction,
+    escort,
+    heroselect,
+    hybrid,
+    match_audio,
+    movelog,
+    notices,
+    pools,
+    stats,
+    world,
+)
+from ow174.game import control as control_mode
 from ow174.game.collision import (
     CollisionProvider,
     LoadState,
@@ -45,15 +61,21 @@ from ow174.game.collision import (
 )
 from ow174.game.commands import Command, CommandQueue
 from ow174.game.content import (
+    FREE_FOR_ALL_TEAM,
     JUNKENSTEIN_MAP,
     JUNKENSTEIN_MODES,
     JUNKENSTEIN_THREE_THEY_WERE,
     PRACTICE_RANGE,
     SOLDIER,
+    SPECTATOR_TEAM,
+    START_IMMEDIATELY,
+    START_MANUALLY,
+    START_WHEN_FULL,
     GameMap,
     Hero,
     heroes,
     spawn_point,
+    team_spawns,
 )
 from ow174.game.environment import ExecutionEnvironment, SystemEnvironment
 from ow174.game.mover import (
@@ -112,9 +134,9 @@ BODY_FLAGS = WITH_TRANSFORM | WITH_SCALE
 # gets the spectator's HUD panel, and a body with only it has no collision and no enemy
 # outline. So the player gets 0x00040001 | the team bit, a body only the team bit.
 TEAM_BIT = 0x800000
+SPECTATOR_BIT = 0x10000000
 # The client knows five teams, bits 23-27 of the filter (GetTeam 0x7FF7894E9570); team 4 is the
 # free-for-all one, whose members are all enemies (0x7FF789B2C690). Bit 28 is the spectator.
-FREE_FOR_ALL_TEAM = 4
 PLAYER_FILTER = 0x00040001
 # The body statescript's health (its HUD number): None = the hero's own pools added up (pools.py).
 HEALTH: float | None = None
@@ -205,6 +227,9 @@ CREATE_LEAD = 18
 
 
 class Player:
+    control_mode_state: control_mode.ModeState | None = None
+    control_respawn = False
+
     def __init__(
         self,
         match: "Match",
@@ -247,7 +272,7 @@ class Player:
             number = len(match.players)
         else:
             number = sum(1 for other in match.players if other.team == team)
-        self.spawn = spawn_point(match.game_map, team, number)  # (position, yaw in degrees)
+        self.spawn = spawn_point(match.game_map, team, number, stage=match.objective_stage)
         self.mover = self.new_mover()
         self.commands = CommandQueue()
         self.impulse_correction: tuple[int, int] | None = None
@@ -258,8 +283,32 @@ class Player:
         self.shown: dict[int, ShownController] = {}  # other players' controller entities on this client
         self.script = Stream(self.entity)  # the player entity's statescript: the controller
         self.mode_script = Stream(GAME_MODE_ENTITY)  # the game mode entity's variables: the countdown
+        self.escort_mode_state: escort.ModeState | None = None
+        self.escort_hud_bound = False
+        self.escort_payload_ready = False
+        self.escort_payload_script = Stream(match.escort.payload) if match.escort is not None else None
+        self.escort_payload_state: escort.PayloadState | None = None
+        self.escort_hud_team_update: EntityUpdate | None = None
+        self.escort_hud_refresh = False
+        self.escort_checkpoint_scripts = (
+            {entity: Stream(entity) for _, entity in match.escort.checkpoints} if match.escort else {}
+        )
+        self.assault_mode_state: escort.ModeState | None = None
+        self.assault_hud_bound = False
+        self.capture_sound_instance: int | None = None
+        self.control_setup_music: int | None = None
+        self.assault_point_scripts: dict[int, Stream] = {}
+        self.assault_point_states: dict[int, assault.PointState] = {}
+        self.assault_outline_scripts: dict[int, Stream] = {}
+        self.assault_outline_states: dict[int, tuple[bool, int]] = {}
+        self.assault_outline_visuals: frozenset[int] = frozenset()
+        self.escort_room_visuals: frozenset[int] = frozenset()
+        self.escort_door_scripts: dict[int, Stream] = {}
+        self.escort_door_states: dict[int, escort.DoorState] = {}
         self.next_countdown = 0.0
-        self.select_open = True
+        self.match_audio = match_audio.Playback()
+        self.select_open = team != SPECTATOR_TEAM
+        self.assembly_pick_confirmed = False
         self.controller_hero: int | None = None  # the hero (v940) the last controller frame named
         # The numbers his Tab board shows (stats.py); the combat code adds to them. His client gets them
         # in component 64 when they change.
@@ -271,6 +320,8 @@ class Player:
     def team_bit(self) -> int:
         """The filter bit of the player's team; in a free-for-all the free-for-all team's, since each
         player's own team number would run past the five teams into the spectator bit."""
+        if self.team == SPECTATOR_TEAM:
+            return SPECTATOR_BIT
         if self.match.game_map.free_for_all:
             return TEAM_BIT << FREE_FOR_ALL_TEAM
         return TEAM_BIT << self.team
@@ -322,6 +373,8 @@ class Player:
         if collision is None:
             return None
         seconds = self.quanta / 1e6
+        if self.match.control is not None:
+            seconds *= self.match.control.movement_scale
         script = self.body_script
         fresh, boundary = self.commands.before_limit(
             commands, MAX_LEASE_FRAME, anchor=script.frame if script is not None else None
@@ -420,7 +473,10 @@ class Player:
         """Resolve body input and consume combat reports from this simulation step."""
         if self.body_script is not None:
             self.match.body_command(self, command, movement_end=movement_end)
-            self.match.combat.command(self, command if posed else None)
+            mode = self.match.objective_round
+            if (mode is None or mode.phase == escort.Phase.ACTIVE
+                    or (isinstance(mode, control_mode.ControlRound) and mode.phase == escort.Phase.UNLOCK)):
+                self.match.combat.command(self, command if posed else None)
         self.track_body_modifiers(command.frame)
 
     def track_body_modifiers(self, frame: int) -> None:
@@ -473,6 +529,8 @@ def card_message(player: Player) -> dict:
 
 
 class Match:
+    control: control_mode.ControlRound | None = None
+
     def __init__(
         self,
         game_map: GameMap,
@@ -494,6 +552,27 @@ class Match:
             self.environment.randbits(63, callsite="match.id.high"),
         )
         self.game_map = game_map
+        if game_map.hybrid is not None:
+            self.escort = hybrid.HybridRound(game_map.hybrid, speed_scale=game_map.payload_speed_scale,
+                                            capture_scale=game_map.capture_speed_scale)
+        elif game_map.escort is not None:
+            self.escort = escort.EscortRound(game_map.escort, speed_scale=game_map.payload_speed_scale)
+        else:
+            self.escort = None
+        self.assault = (assault.AssaultRound(game_map.assault, capture_scale=game_map.capture_speed_scale)
+                        if game_map.assault is not None else None)
+        if (rooms := self.escort or self.assault) is not None:
+            rooms.waiting_for_players = game_map.custom_start in (START_WHEN_FULL, START_MANUALLY)
+        if game_map.control is not None:
+            scene = game_map.control
+            stages = list(range(len(scene.points)))
+            if scene.fixed_stage in stages:
+                order = (scene.fixed_stage,) * len(stages)
+            else:
+                first = stages.pop(self.environment.randbelow(len(stages), callsite="match.control.first"))
+                second = stages.pop(self.environment.randbelow(len(stages), callsite="match.control.second"))
+                order = (first, second, *stages)
+            self.control = control_mode.ControlRound(scene, order)
         self.card = card  # the queue card it was made for; 0 = none (the Practice Range)
         # (account, hero GUID) -> (skin theme, golden weapon) the player has equipped, from the lobby.
         # The client's hero select equips a skin through the lobby (24500), even in a match.
@@ -541,6 +620,8 @@ class Match:
             )
             if self.collision_state.status == "ready":
                 self.collision_world = self.collision_state.world
+                if self.objective_round is not None:
+                    self.collision_world = self.objective_round.collision_world(self.collision_world)
                 for player in self.players:
                     player.mover.use(world=self.collision_world)
         return self.collision_world is not None
@@ -644,7 +725,7 @@ class Match:
         sizes = self.game_map.team_sizes
         teams = []
         if self.game_map.free_for_all:  # the mode's one team, "FFA", holds everyone
-            slots = [{"+0x0": player.entity} for player in playing]
+            slots = [{"+0x0": player.entity} for player in playing if player.team != SPECTATOR_TEAM]
             teams.append({"+0x18": slots, "+0x60": FREE_FOR_ALL_TEAM, "+0x61": sizes[0]})
         for team in () if self.game_map.free_for_all else (0, 1):
             slots = [{"+0x0": player.entity} for player in playing if player.team == team]
@@ -654,6 +735,7 @@ class Match:
             "+0x0": {
                 "+0x0": {
                     "+0x0": {"+0x0": records},
+                    "+0xA8": self.game_map.preset_guid,
                     "+0xB0": self.game_map.mode_guid,
                     "+0xC0": teams,
                     "+0xD8": [{"+0x0": viewer.entity}],
@@ -684,14 +766,34 @@ class Match:
     def placeable_ids(self) -> list[int]:
         return [0x80000000 | index for index in self.game_map.placeables]
 
+    @staticmethod
+    def _placeable_create(entity: int) -> EntityUpdate:
+        index = entity & 0x7FFFFFFF
+        return EntityUpdate(entity, OP_CREATE, lambda origin: world.create_placeable(origin, index))
+
+    def _room_create(self, entity: int) -> EntityUpdate:
+        placement = self.objective_round.overlays.get(entity)
+        if placement is None or placement.placement_definition is None:
+            return self._placeable_create(entity)
+        return EntityUpdate(entity, OP_CREATE, partial(
+            world.create, definition=placement.placement_definition, components={},
+            position=placement.position, rotation=placement.rotation, scale=placement.scale,
+        ))
+
     def spawn_updates(self, viewer: Player) -> list[EntityUpdate]:
         """The frame that ends the loading screen: the placeables, the viewer's player (and body, if it
         has one), the game mode entity, the training bots, and the bodies of the players already in the
         world."""
+        capture = self.escort.capture if isinstance(self.escort, hybrid.HybridRound) else self.assault
+        outlines = capture.outlines if capture is not None else ()
+        # The retail loader waits for every required map placement, including
+        # spawn points for the other team and later objectives.
         updates = [
-            EntityUpdate(entity, OP_CREATE, lambda origin, index=index: world.create_placeable(origin, index))
-            for entity, index in zip(self.placeable_ids(), self.game_map.placeables, strict=True)
+            self._placeable_create(entity) for entity in self.placeable_ids() if entity not in outlines
         ]
+        if self.objective_round is not None:
+            viewer.escort_room_visuals = self.objective_round.room_visuals(viewer.team)
+            updates.extend(self._room_create(entity) for entity in sorted(viewer.escort_room_visuals))
         if viewer.has_body:
             updates += self.own_body_updates(viewer)
         updates.append(
@@ -911,7 +1013,9 @@ class Match:
         )
 
     def _game_mode_create(self, origin: int) -> world.RecordWriter:
-        return world.create(origin, GAME_MODE_DEFINITION, {114: [None, self.game_map.mode_guid]})
+        return world.create(origin, GAME_MODE_DEFINITION, {
+            114: [None, self.game_map.mode_guid, self.game_map.preset_guid or None],
+        })
 
     def remote_body_create(self, viewer: Player, other: Player) -> EntityUpdate:
         """Another player's body: placed by its transform, then moved by movement records from the next
@@ -933,6 +1037,8 @@ class Match:
         retail server sent them (OW2's live traffic); the first in the frame after the body's create. And
         the viewer's own body's state, which its client checks its prediction against (correction.py)."""
         updates = []
+        if self.escort is not None and viewer.escort_payload_ready:
+            updates.append(EntityUpdate(self.escort.payload, movement=self.escort.movement()))
         for other in self.players:
             if other is viewer or other.body not in viewer.seen:
                 continue
@@ -1100,22 +1206,43 @@ class Match:
             self.combat.update(now, tick, frames=frames)
         if self.assemble_ends is not None and not self.assembled and now >= self.assemble_ends:
             self._end_assemble(now)
+        if self.escort is not None:
+            self._update_escort(now)
+        if self.assault is not None:
+            self._update_assault(now)
+        if self.control is not None:
+            self._update_control(now)
         for player in self.players:
             client = player.client
             if client is None:
                 continue
+            if player.control_respawn and (not player.has_body or self.switch_hero(player, player.hero)):
+                player.control_respawn = False
             if player.loaded_at is not None:
                 self._spawn_steps(player, client, now)
             if player.script.data_last and now >= player.script.next_ack:
                 self._owner_ack(player, player.script, now)
             if player.body_script is not None and player.spawned and frames:
                 self._body_frames(player, client)
-            if self.assembling() and player.steps_done >= 4 and now >= player.next_countdown:
-                self._send_countdown(player, now)
             if player.steps_done >= 4:
+                if self.objective_round is not None:
+                    self._send_objective_rooms(player, now)
+                elif self.assembling() and now >= player.next_countdown:
+                    self._send_countdown(player, now)
+                # Read the acknowledged objective snapshot before queuing a fresh
+                # clock or progress delta on the same stream.
+                if self.control is None and self.game_map.mode_guid in match_audio.MODES:
+                    self._send_match_audio(player, now)
+                if self.escort is not None:
+                    self._send_escort(player, now)
+                elif self.assault is not None:
+                    self._send_assault(player, now)
+                elif self.control is not None:
+                    self._send_control(player, now)
+                    self._send_match_audio(player, now)
                 self._send_board(player, now)
                 if (player.hero.guid if player.has_body else None) != player.controller_hero:
-                    self.send_controller(player)  # v940 follows the hero (a switch that kept the screen)
+                    self.send_controller(player)  # server-side body changes also update v940
         self.notices.update(now)
         for viewer in self.players:
             if not viewer.spawned or viewer.client is None:
@@ -1148,8 +1275,7 @@ class Match:
             log.info("[game] %s: %s spawned", self.label(), player.describe())
             if (not scene_ready and self.controller.graph == heroselect.PVP.graph
                     and self.assemble_ends is None):
-                self.assemble_ends = now + ASSEMBLE_SECONDS
-                log.info("[game] %s: assemble your team, %d s", self.label(), ASSEMBLE_SECONDS)
+                self._check_automatic_assembly(now)
         if player.steps_done == 3 and waited >= SEND_CONTROLLER:
             if scene_ready and not player.mode_script.delivered:
                 return
@@ -1161,6 +1287,8 @@ class Match:
                     player.steps_done = 3
                     return
                 player.select_open = False
+            elif self.assembled and player.has_body:
+                player.select_open = False
             self.send_controller(player)
             self.combat.spawned(player)
         elif player.steps_done == 4 and not player.script.data_last:
@@ -1171,12 +1299,51 @@ class Match:
     def assembling(self) -> bool:
         return self.assemble_ends is not None and not self.assembled
 
+    @property
+    def in_custom_warmup(self) -> bool:
+        return self.assemble_ends is None and self.game_map.custom_start in (START_WHEN_FULL, START_MANUALLY)
+
+    def _check_automatic_assembly(self, now: float) -> None:
+        rule = self.game_map.custom_start
+        if rule in (None, START_IMMEDIATELY) or (
+            rule == START_WHEN_FULL and not any(size > 0 for size in self.free_places(loaded_only=True))
+        ):
+            self._begin_assembly(now)
+
+    def start_custom_mode(self, now: float) -> bool:
+        if not self.in_custom_warmup:
+            return False
+        self._begin_assembly(now)
+        return True
+
+    def _begin_assembly(self, now: float) -> None:
+        was_waiting = self.in_custom_warmup
+        self.assemble_ends = now + ASSEMBLE_SECONDS
+        log.info("[game] %s: assemble your team, %d s", self.label(), ASSEMBLE_SECONDS)
+        if was_waiting:
+            if (rooms := self.escort or self.assault) is not None:
+                geometry = rooms.payload_collision
+                previous = geometry.room_shapes if geometry is not None else ()
+                rooms.waiting_for_players = False
+                rooms._update_room_collision()
+                if geometry is not None:
+                    self._refresh_objective_contacts(previous, geometry.room_shapes)
+            for player in self.players:
+                if player.client is not None and player.steps_done >= 4 and player.team != SPECTATOR_TEAM:
+                    if self.control is not None:
+                        player.control_respawn = player.has_body
+                        player.assembly_pick_confirmed = False
+                    player.select_open = True
+                    self.send_controller(player)
+
     def _send_countdown(self, player: Player, now: float) -> None:
         """The seconds left, as the game mode entity's v1303. The client shows them rounded up."""
         player.next_countdown = now + COUNTDOWN_EVERY
         seconds = max(0.0, self.assemble_ends - now)
+        custom_assembly = self.assembling() and self.game_map.custom_start is not None
         frame = combat.mode_frame(
             {COUNTDOWN: float(seconds)}, self.game_map.mode_guid, self.game_map.map_guid,
+            phase_state=combat.ASSEMBLE_HEROES_STATE if custom_assembly else None,
         )
         player.client.queue_mode_frame(frame)
 
@@ -1185,13 +1352,501 @@ class Match:
         selector goes."""
         self.assembled = True
         log.info("[game] %s: heroes assembled", self.label())
+        if (mode := self.objective_round) is not None:
+            geometry = mode.payload_collision
+            previous = geometry.room_shapes if geometry is not None else ()
+            mode.start_setup(self.assemble_ends)
+            if geometry is not None and previous is not geometry.room_shapes:
+                self._refresh_objective_contacts(previous, geometry.room_shapes)
+            log.info("[game] %s: setup, %.0f s", self.label(),
+                     mode.deadline - self.assemble_ends)
         for player in self.players:
+            player.assembly_pick_confirmed = False
             if player.client is None or player.steps_done < 4:
                 continue
-            self._send_countdown(player, now)
+            if self.objective_round is None:
+                self._send_countdown(player, now)
             if player.has_body:
                 player.select_open = False
             self.send_controller(player)
+
+    def _send_match_audio(
+        self, player: Player, now: float, *, capture: escort.ModeState | None = None,
+    ) -> None:
+        if (not player.script.delivered or not player.mode_script.delivered
+                or player.client.leaving_since is not None):
+            return
+        mode = self.objective_round
+        if isinstance(mode, control_mode.ControlRound):
+            state = player.control_mode_state
+            phase = mode.phase if self.assemble_ends is not None else escort.Phase.WAITING
+            if state is None or state.round_index != mode.round_index:
+                return
+            if phase == escort.Phase.ACTIVE:
+                # Announce activation when this viewer is sent the unlocked point.
+                # The mode clock's ACK can arrive after the point's update.
+                point = player.assault_point_states.get(mode.entities[mode.stage])
+                if point is None or point.presentation[0]:
+                    return
+            elif state.phase != phase:
+                return
+            overtime = state.instance_vars[0x0D40][0]
+            seconds = 0 if phase == escort.Phase.ACTIVE else math.ceil(state.seconds)
+            timeline = match_audio.Timeline(
+                int(phase), seconds, state.round_index, overtime, mode.winner,
+                control_wins=state.instance_vars[0x09C3][0], round_winner=mode.round_winner,
+            )
+            player.match_audio.update(player, now, timeline, single_countdown=False)
+            return
+        if mode is not None:
+            state = capture or player.escort_mode_state or player.assault_mode_state
+            phase = mode.phase if self.assemble_ends is not None else escort.Phase.WAITING
+            stage = mode.room_stage
+            if self.escort is not None:
+                stage = min(stage, len(self.escort.checkpoints) - 1 + self.escort.stage_offset)
+            # The payload/point transition may still be waiting for this viewer's scene ACKs.
+            if state is None or state.phase != phase or state.stage != stage:
+                return
+            previous = player.match_audio.previous
+            if capture is None and player.mode_script.data_in_flight and (
+                previous is None or (previous.phase, previous.stage) != (phase, stage)
+            ):
+                return
+            clock = self.assemble_ends if phase == escort.Phase.ASSEMBLE else mode.deadline
+            seconds = max(0, math.ceil(clock - now)) if phase in (
+                escort.Phase.ASSEMBLE, escort.Phase.SETUP, escort.Phase.ACTIVE,
+            ) else 0
+            # Use the last delivered cart snapshot so the cue follows the same
+            # proximity edge as the client's music.
+            cart = player.escort_payload_state
+            if (self.escort is not None and phase == escort.Phase.ACTIVE and previous is None
+                    and not player.escort_payload_script.delivered):
+                return  # A live join starts from the current cart state.
+            near_finish = previous.near_finish if previous is not None else False
+            if cart is not None and not player.escort_payload_script.data_in_flight:
+                near_finish = cart.near_finish
+            timeline = match_audio.Timeline(int(phase), seconds, stage, mode.overtime, mode.winner,
+                                            near_finish=phase == escort.Phase.ACTIVE and near_finish)
+        elif self.assembling():
+            seconds = max(0, math.ceil(self.assemble_ends - now))
+            timeline = match_audio.Timeline(int(escort.Phase.ASSEMBLE), seconds)
+        else:
+            phase = escort.Phase.ACTIVE if self.assembled else escort.Phase.WAITING
+            timeline = match_audio.Timeline(int(phase), 0)
+        player.match_audio.update(player, now, timeline, single_countdown=mode is None)
+
+    def _update_escort(self, now: float) -> None:
+        mode = self.escort
+        phase, stage = mode.phase, mode.room_stage
+        geometry = mode.payload_collision
+        previous_cart = geometry.shapes if geometry is not None else ()
+        previous_rooms = geometry.room_shapes if geometry is not None else ()
+        living = self._living_objective_players()
+        riders = [
+            (p, local) for p in living if (local := geometry.rider(p.mover)) is not None
+        ] if previous_cart and phase == escort.Phase.ACTIVE else []
+        mode.advance(now, ((p.body, p.team, p.mover.position) for p in living))
+        if geometry is not None and (previous_cart is not geometry.shapes
+                                     or previous_rooms is not geometry.room_shapes):
+            self._refresh_objective_contacts(
+                previous_cart + previous_rooms, geometry.shapes + geometry.room_shapes,
+            )
+        if geometry is not None and previous_cart is not geometry.shapes:
+            for player, local in riders:
+                geometry.carry(player.mover, local, RETAIL_QUANTA / 1e6)
+        if mode.phase != phase:
+            if mode.winner is not None:
+                log.info("[game] %s: round complete, team %d wins", self.label(), mode.winner + 1)
+            else:
+                log.info("[game] %s: objectives active", self.label())
+        if mode.room_stage != stage and mode.phase != escort.Phase.COMPLETE:
+            log.info("[game] %s: objective stage %d", self.label(), mode.room_stage)
+            self._assign_objective_spawns()
+
+    @property
+    def objective_round(self) -> escort.EscortRound | assault.AssaultRound | control_mode.ControlRound | None:
+        return self.escort or self.assault or self.control
+
+    @property
+    def capture_round(self) -> assault.AssaultRound | control_mode.ControlRound | None:
+        if isinstance(self.escort, hybrid.HybridRound):
+            return self.escort.capture
+        return self.assault or self.control
+
+    @property
+    def objective_stage(self) -> int:
+        return self.objective_round.room_stage if self.objective_round is not None else 0
+
+    def _living_objective_players(self) -> list[Player]:
+        return [
+            player for player in self.players
+            if player.spawned and player.has_body and player.client is not None
+            and player.client.leaving_since is None and not self.combat.is_dead(player)
+        ]
+
+    def _refresh_objective_contacts(self, previous: tuple, current: tuple) -> None:
+        expired = set(previous) - set(current)
+        for player in self.players:
+            body = player.mover.body
+            if body is not None:
+                body.contacts[:] = [contact for contact in body.contacts if contact.shape not in expired]
+                body.moved = True
+
+    def _assign_objective_spawns(self) -> None:
+        numbers = [0, 0]
+        for player in self.players:
+            if not player.gone and player.team in (0, 1):
+                team = player.team
+                player.spawn = spawn_point(self.game_map, team, numbers[team], stage=self.objective_stage)
+                numbers[team] += 1
+
+    def _objective_spawn_candidates(self, stage: int) -> tuple[tuple[expr.Entity, ...], ...] | None:
+        """0C8F publishes the active map spawn entities in team order for the native mode UI."""
+        placeables = set(self.game_map.placeables)
+        candidates = tuple(
+            tuple(expr.Entity(escort.MAP_ENTITY | spawn.placeable)
+                  for spawn in team_spawns(self.game_map, team, stage)
+                  if spawn.team == team and spawn.placeable is not None and spawn.placeable in placeables)
+            for team in (0, 1)
+        )
+        return candidates if all(candidates) else None
+
+    def _update_assault(self, now: float) -> None:
+        mode = self.assault
+        phase, stage = mode.phase, mode.stage
+        geometry = mode.payload_collision
+        previous = geometry.room_shapes if geometry is not None else ()
+        mode.advance(now, ((p.body, p.team, p.mover.position) for p in self._living_objective_players()))
+        if geometry is not None and previous is not geometry.room_shapes:
+            self._refresh_objective_contacts(previous, geometry.room_shapes)
+        if mode.stage != stage:
+            self._assign_objective_spawns()
+            log.info("[game] %s: assault objective B active", self.label())
+        if mode.phase != phase and mode.winner is not None:
+            log.info("[game] %s: assault complete, team %d wins", self.label(), mode.winner + 1)
+
+    def _update_control(self, now: float) -> None:
+        mode = self.control
+        geometry = mode.payload_collision
+        previous = geometry.room_shapes if geometry is not None else ()
+        if mode.phase == escort.Phase.COMPLETE and mode.winner is None and now >= mode.deadline:
+            mode.next_round(now)
+            self._assign_objective_spawns()
+            for player in self.players:
+                if player.client is not None and player.has_body and player.team in control_mode.TEAMS:
+                    player.control_respawn = True
+                    if player.select_open:
+                        player.select_open = False
+                        self.send_controller(player)
+        else:
+            mode.advance(now, ((p.body, p.team, p.mover.position) for p in self._living_objective_players()))
+        if geometry is not None and previous is not geometry.room_shapes:
+            self._refresh_objective_contacts(previous, geometry.room_shapes)
+
+    def _send_control(self, player: Player, now: float) -> None:
+        client, mode = player.client, self.control
+        if not self._point_descriptors_delivered(player, mode):
+            return
+        previous = player.control_mode_state
+        state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered),
+                                viewer_team=player.team, previous=previous)
+        command_frame = player.commands.last_frame or 0
+        if previous is None:
+            if client.scene_mode_writable:
+                client.queue_scene_mode_frame(state.frame(None, command_frame=command_frame), full=True)
+                player.control_mode_state = state
+            return
+        if not player.mode_script.delivered:
+            return
+        next_round = state.round_index != previous.round_index
+        if next_round and (player.control_respawn or client.own_possession_pending):
+            return  # Keep the summary until this viewer has switched to the new spawn.
+        setup_start = state.phase == escort.Phase.SETUP and (next_round or previous.phase != state.phase)
+        match_ending = mode.winner is not None and previous.phase != escort.Phase.COMPLETE
+        opening = (previous.phase == escort.Phase.UNLOCK and state.phase == escort.Phase.ACTIVE
+                   and state.round_index == previous.round_index and state.owner == previous.owner)
+        round_ending = (previous.phase == escort.Phase.ACTIVE
+                        and state.phase in (escort.Phase.ROUND_END, escort.Phase.COMPLETE)
+                        and state.round_index == previous.round_index and state.owner == previous.owner)
+        switching = not (opening or round_ending or setup_start) and (
+            (state.phase, state.stage, state.owner) != (previous.phase, previous.stage, previous.owner)
+        )
+        points_ready = self._send_capture_points(player, mode, switching_objective=switching)
+        if match_ending:
+            # Hide the HUD even if the old point update is still awaiting an ACK.
+            points_ready = True
+        elif opening or round_ending or setup_start:
+            # Send the phase cutover with the point update instead of waiting for its ACK.
+            point = player.assault_point_states.get(mode.entities[mode.stage])
+            points_ready = (point is not None and point.presentation[0] == (round_ending or setup_start)
+                            and point.waypoint_visible == (opening or setup_start))
+        if client.scene_mode_writable and points_ready and state != previous:
+            action = state.action_from(previous)
+            stamp = player.mode_script.last + 1
+            callout = (stamp, 1, action) if action is not None else None
+            round_callouts = tuple((stamp, 1, cue) for cue in state.round_actions_from(previous))
+            setup_music = None
+            removed_instance = None
+            if state.setup_music_from(previous):
+                setup_music = match_audio.sound_effect_instance(control_mode.SETUP_MUSIC_EFFECT)
+                if setup_music is not None:
+                    callout = (stamp, setup_music.id, match_audio.CAPTURE_SOUND_ACTION)
+            elif state.phase != escort.Phase.SETUP or state.round_index != previous.round_index:
+                removed_instance = player.control_setup_music
+            client.queue_scene_mode_frame(
+                state.frame(previous, callout=callout, round_callouts=round_callouts, setup_music=setup_music,
+                            removed_instance=removed_instance, command_frame=command_frame), full=False,
+            )
+            if setup_music is not None:
+                player.control_setup_music = setup_music.id
+            elif removed_instance is not None:
+                player.control_setup_music = None
+            player.control_mode_state = state
+
+    def _send_objective_rooms(self, player: Player, now: float) -> None:
+        client = player.client
+        mode = self.objective_round
+        visuals = mode.room_visuals(player.team)
+        if visuals != player.escort_room_visuals:
+            expired = sorted(player.escort_room_visuals - visuals)
+            activated = sorted(visuals - player.escort_room_visuals)
+            updates = [EntityUpdate(entity, OP_DESTROY) for entity in expired]
+            updates.extend(self._room_create(entity) for entity in activated)
+            client.queue_entities(updates)
+            player.escort_room_visuals = visuals
+        for entity, door in player.escort_door_scripts.items():
+            if door.data_in_flight:
+                continue
+            previous_door = player.escort_door_states.get(entity)
+            state = mode.door_state(entity, now, previous_door)
+            if (state != previous_door
+                    and (frame := mode.door_frame(entity, state, previous_door, now=now)) is not None):
+                first_pose = previous_door is None
+                records = door.reliable_frames(frame, 4096, full=first_pose)
+                if first_pose:
+                    records[-1].movement = mode.door_movement(entity)
+                client.queue_entities(records)
+                player.escort_door_states[entity] = state
+
+    def _send_assault(self, player: Player, now: float) -> None:
+        client, mode = player.client, self.assault
+        if not self._point_descriptors_delivered(player, mode):
+            return
+        previous = player.assault_mode_state
+        state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered),
+                                viewer_team=player.team)
+        # The mode creates 1FEB and its nested 0CB6 locally. Wait for the
+        # mode baseline before attaching the point presenters to those containers.
+        if previous is None:
+            if client.scene_mode_writable:
+                client.queue_scene_mode_frame(state.frame(None), full=True)
+                player.assault_mode_state = state
+            return
+        if not player.mode_script.delivered:
+            return
+        bind = self._can_bind_capture_hud(player, mode, previous)
+        switching_objective = any(
+            state.instance_vars[key] != previous.instance_vars[key] for key in (59, 0x2934)
+        )
+        points_ready = self._send_capture_points(player, mode, switching_objective=switching_objective)
+        if points_ready and client.scene_mode_writable and (state != previous or bind):
+            if self._send_objective_capture_sound(player, previous, state, now):
+                return
+            cmfd = max(1, self.tick) if bind else None
+            action = match_audio.mode_action(previous, state)
+            callout = (player.mode_script.last + 1, 1, action) if action is not None else None
+            frame = state.frame(previous, callout=callout, progress_cmfd=cmfd,
+                                progress_bindings=assault.PROGRESS_BINDINGS,
+                                removed_instance=player.capture_sound_instance)
+            client.queue_scene_mode_frame(frame, full=False)
+            player.capture_sound_instance = None
+            player.assault_mode_state = state
+            player.assault_hud_bound |= bind
+
+    @staticmethod
+    def _point_descriptors_delivered(
+        player: Player, mode: assault.AssaultRound | control_mode.ControlRound,
+    ) -> bool:
+        streams = player.assault_point_scripts
+        return all(entity in streams and streams[entity].delivered for entity in mode.entities)
+
+    @staticmethod
+    def _can_bind_capture_hud(player: Player, mode: assault.AssaultRound, previous: escort.ModeState) -> bool:
+        return (not player.assault_hud_bound and escort.ESCORT_HUD in previous.states
+                and len(player.assault_point_states) == len(mode.entities)
+                and not any(stream.data_in_flight for stream in player.assault_point_scripts.values()))
+
+    def _send_capture_points(
+        self, player: Player, mode: assault.AssaultRound | control_mode.ControlRound, *,
+        switching_objective: bool,
+    ) -> bool:
+        streams = player.assault_point_scripts
+        # The point streams are acknowledged independently. Retire the old
+        # presenter before enabling the new point even if a delta is lost.
+        waypoint_ready = all(
+            not stream.data_in_flight and (entity not in player.assault_point_states
+                                          or not player.assault_point_states[entity].waypoint_visible)
+            for entity, stream in streams.items() if entity != mode.entities[mode.stage]
+        )
+        points_ready = True
+        self._send_assault_outlines(player, mode)
+        for index, entity in enumerate(mode.entities):
+            stream = streams[entity]
+            old_point = player.assault_point_states.get(entity)
+            point = mode.point_state(index)
+            if switching_objective and (
+                old_point is None or point.presentation != old_point.presentation
+                or point.owner != old_point.owner
+                or point.waypoint_visible != old_point.waypoint_visible or stream.data_in_flight
+            ):
+                points_ready = False
+            showing_waypoint = point.waypoint_visible and (
+                old_point is None or not old_point.waypoint_visible
+            )
+            if (point != old_point and not stream.data_in_flight
+                    and (not showing_waypoint or waypoint_ready)):
+                frame = point.frame(old_point)
+                player.client.queue_entities(stream.reliable_frames(frame, 4096, full=old_point is None))
+                player.assault_point_states[entity] = point
+        return points_ready
+
+    def _send_objective_capture_sound(
+        self, player: Player, previous: escort.ModeState, state: escort.ModeState, now: float,
+    ) -> bool:
+        if player.capture_sound_instance is not None or previous.phase != escort.Phase.ACTIVE:
+            return False
+        advanced = state.phase == escort.Phase.ACTIVE and state.stage > previous.stage
+        captured_last_point = (self.assault is not None and state.phase == escort.Phase.COMPLETE
+                               and self.assault.winner == escort.ATTACKERS)
+        if not (advanced or captured_last_point):
+            return False
+        frame = match_audio.capture_sound_frame(player.mode_script.last + 1, player.team)
+        if frame is None:
+            return False
+        # Keep the one-shot separate from the phase delta, which can also carry a music action.
+        player.client.queue_scene_mode_frame(frame, full=False)
+        player.capture_sound_instance = match_audio.CAPTURE_SOUND_INSTANCE
+        self._send_match_audio(player, now, capture=state)
+        return True
+
+    def _send_assault_outlines(
+        self, player: Player, mode: assault.AssaultRound | control_mode.ControlRound,
+    ) -> None:
+        if isinstance(mode, assault.AssaultRound):
+            self._update_assault_outline_placements(player, mode)
+        for entity, stream in player.assault_outline_scripts.items():
+            if stream.data_in_flight:
+                continue
+            index = mode.outlines[entity]
+            point = mode.entities[index]
+            sent = player.assault_point_states.get(point)
+            if (sent is None or sent.presentation != mode.point_state(index).presentation
+                    or player.assault_point_scripts[point].data_in_flight):
+                continue
+            locked, _ = sent.presentation
+            owner = sent.owner if isinstance(mode, control_mode.ControlRound) else assault.DEFENDERS
+            state = (locked, owner)
+            previous = player.assault_outline_states.get(entity)
+            if previous != state:
+                full = previous is None
+                frame = assault.outline_frame(locked, full=full, owner=owner)
+                if frame is not None:
+                    player.client.queue_entities(stream.reliable_frames(frame, 4096, full=full))
+                    player.assault_outline_states[entity] = state
+
+    def _update_assault_outline_placements(self, player: Player, mode: assault.AssaultRound) -> None:
+        previous = player.assault_outline_visuals
+        visible = {entity for entity, index in mode.outlines.items() if mode.outline_visible(index)}
+        ready = set(visible & previous)
+        for entity in visible - previous:
+            index = mode.outlines[entity]
+            point = mode.entities[index]
+            sent = player.assault_point_states.get(point)
+            if (sent is not None and sent.presentation == mode.point_state(index).presentation
+                    and not player.assault_point_scripts[point].data_in_flight):
+                ready.add(entity)
+        if ready != previous:
+            updates = [EntityUpdate(entity, OP_DESTROY) for entity in sorted(previous - ready)]
+            updates.extend(self._placeable_create(entity) for entity in sorted(ready - previous))
+            player.client.queue_entities(updates)
+            player.assault_outline_visuals = frozenset(ready)
+
+    def _send_escort(self, player: Player, now: float) -> None:
+        client = player.client
+        mode = self.escort
+        script = player.escort_payload_script
+        previous_payload = player.escort_payload_state
+        previous = player.escort_mode_state
+        state = mode.mode_state(now, self.assemble_ends, hero_select_ready=bool(player.script.delivered),
+                                viewer_team=player.team)
+        candidates = self._objective_spawn_candidates(state.stage)
+        if candidates is not None or (previous is not None and escort.ACTIVE_SPAWNS in previous.entity_vars):
+            state.entity_vars[escort.ACTIVE_SPAWNS] = (candidates, ())
+        bind_capture = False
+        if isinstance(mode, hybrid.HybridRound):
+            capture = mode.capture
+            if not self._point_descriptors_delivered(player, capture):
+                return
+            if previous is not None and player.mode_script.delivered:
+                switching = (previous.phase, previous.stage) != (state.phase, state.stage)
+                if not self._send_capture_points(player, capture, switching_objective=switching):
+                    return
+                if not state.stage and not previous.stage:
+                    bind_capture = self._can_bind_capture_hud(player, capture, previous)
+        payload = mode.payload_state()
+        if not payload.active:
+            player.escort_hud_refresh = False
+        refresh_markers = player.escort_hud_refresh and player.escort_hud_team_update is None
+        if refresh_markers and previous_payload is not None and previous_payload.checkpoint_fractions:
+            # Recreate the checkpoint rows with the new palette. Keep the active route
+            # bar and the mode's checkpoint count while the client acknowledges this delta.
+            payload = replace(payload, checkpoint_fractions=())
+        cart_phase_delivered = (previous_payload is not None and previous_payload.active == payload.active
+                                and not script.data_in_flight)
+        # The mode baseline starts the client-owned HUD before the cart's presenter needs it.
+        animation_time = (max(0.0, now - mode.unlock_at)
+                          if isinstance(mode, hybrid.HybridRound)
+                          and payload.animation == escort.PAYLOAD_UNLOCK_ANIM else 0.0)
+        if (player.escort_payload_ready and player.mode_script.delivered
+                and not script.data_in_flight and payload != previous_payload):
+            frame = payload.frame(previous_payload, animation_time=animation_time, now=now)
+            if frame is not None:
+                client.queue_entities(script.reliable_frames(frame, 4096, full=previous_payload is None))
+                player.escort_payload_state = payload
+                if refresh_markers:
+                    player.escort_hud_refresh = False
+        if (not client.scene_mode_writable or not player.escort_payload_ready
+                or (player.escort_payload_state is not None and not script.delivered)
+                or not all(stream.delivered for stream in player.escort_checkpoint_scripts.values())):
+            return
+        # Unlock the existing HUD objective before the mode announces live play.
+        if (not cart_phase_delivered and previous is not None
+                and escort.HUD_PAYLOAD in state.states and escort.HUD_PAYLOAD not in previous.states):
+            return
+        # The cart baseline is acknowledged here. Bind the progress track with the
+        # active objective delta, including Hybrid's transition off point A.
+        bind_cart = (previous is not None and cart_phase_delivered and escort.HUD_PAYLOAD in state.states
+                     and not player.escort_hud_bound)
+        if state != previous or bind_cart or bind_capture:
+            if previous is not None and self._send_objective_capture_sound(player, previous, state, now):
+                return
+            action = match_audio.mode_action(previous, state) if previous is not None else None
+            # The delta carries one short action. Defer the cart binding if a timed cue uses it.
+            bind_cart = bind_cart and action is None
+            if bind_cart:
+                action = escort.HUD_CART_CHANGED
+            callout = (player.mode_script.last + 1, 1, action) if action is not None else None
+            cmfd = max(1, self.tick) if bind_cart or bind_capture else None
+            bindings = assault.PROGRESS_BINDINGS if bind_capture else escort.HUD_PROGRESS_BINDINGS
+            client.queue_scene_mode_frame(
+                state.frame(previous, callout=callout, progress_cmfd=cmfd, progress_bindings=bindings,
+                            removed_instance=player.capture_sound_instance),
+                full=previous is None,
+            )
+            player.escort_mode_state = state
+            player.capture_sound_instance = None
+            player.escort_hud_bound |= bind_cart
+            player.assault_hud_bound |= bind_capture
 
     # --- the player's statescript --------------------------------------------------------------
 
@@ -1209,11 +1864,16 @@ class Match:
         cmfd = player.script.next_cmfd(self._newest_frame(player))
         practice = self.controller is heroselect.PRACTICE
         skins = player.select_open and (practice or self.assembling())
+        hide_assemble = True if practice else None
+        if self.game_map.custom_start in (START_WHEN_FULL, START_MANUALLY):
+            hide_assemble = self.in_custom_warmup
         switch = self.notices.presence(player)  # the last hero switch for the chat line (notices.py)
         hero = player.controller_hero = player.hero.guid if player.has_body else None
         frame = heroselect.controller_frame(
-            self.controller, cmfd, player.select_open, skins, practice, presence=switch, hero=hero,
+            self.controller, cmfd, player.select_open, skins, hide_assemble, presence=switch, hero=hero,
             body=player.body if player.has_body else None,
+            pick_confirmed=player.assembly_pick_confirmed,
+            objective=heroselect.objective_variables(self.game_map.mode_guid, player.team),
         )
         update = player.script.full_frame(frame)
         # A switch notice is a separate event, even when the menu is already closed.
@@ -1575,10 +2235,16 @@ class Match:
         if message == 0x0240000000001313:
             self._wheel_use_report(player, value, parameters)
             return
-        if isinstance(self.controller, heroselect.FixedController):
+        if player.team == SPECTATOR_TEAM or isinstance(self.controller, heroselect.FixedController):
             return  # Tutorial has no hero picker or reopen request.
         if message == heroselect.PICK_HERO:
-            hero = heroes().get(heroselect.picked_hero(parameters) or 0)
+            guid = heroselect.picked_hero(parameters)
+            if guid == 0:
+                if self.assembling() and player.assembly_pick_confirmed:
+                    player.assembly_pick_confirmed = False
+                    self.send_controller(player)
+                return
+            hero = heroes().get(guid or 0)
             if hero is None:
                 log.warning("[game] %s: no hero found in the pick", self.label())
                 return
@@ -1591,9 +2257,9 @@ class Match:
             if ((needs_body or hero is not player.hero or skin != player.skin)
                     and not self.switch_hero(player, hero)):
                 return
-            if self.assembling():
-                return  # the screen stays open until the heroes are assembled, as in retail
-            player.select_open = False
+            player.assembly_pick_confirmed = self.assembling()
+            if not player.assembly_pick_confirmed:
+                player.select_open = False
             self.send_controller(player)
         elif message == heroselect.OPEN_OR_CLOSE:
             wanted = heroselect.wanted_open(parameters)
@@ -1626,11 +2292,67 @@ class Match:
                 return entity
         return None
 
+    def move_custom_player(self, player: Player, team: int) -> bool:
+        """Retire the old team's pawn and open hero selection when moving to a playing team."""
+        old_team = player.team
+        if team == old_team:
+            return True
+        old_body = player.body if player.has_body else None
+        next_body = self._next_body_id(player) if old_body is not None else player.body
+        if next_body is None:
+            return False
+        player.team = team
+        if player.control_respawn:
+            player.control_respawn = False
+        number = sum(other is not player and not other.gone and other.team == team for other in self.players)
+        player.spawn = spawn_point(self.game_map, team, number, stage=self.objective_stage)
+        if old_body is not None:
+            self.stop_body_script(player)
+            self.combat.retire_player_body(player)
+        player.has_body = False
+        player.new_body(next_body)
+        player.select_open = team != SPECTATOR_TEAM
+        player.assembly_pick_confirmed = False
+        mode = self.escort
+        cart = player.escort_payload_state
+        player.escort_hud_refresh = bool(
+            mode is not None and mode.phase == escort.Phase.ACTIVE and mode.stage
+            and cart is not None and cart.active and team in (escort.ATTACKERS, escort.DEFENDERS)
+        )
+        player.escort_hud_team_update = None
+        for viewer in self.players:
+            client = viewer.client
+            if client is None or not viewer.spawned:
+                continue
+            client.queue_reliable(20301, {"+0x78": self.game_struct(viewer)})
+            if viewer is player or player.entity in viewer.shown:
+                components = {26: [PLAYER_FILTER | player.team_bit]}
+                if old_body is not None:
+                    client.cancel_possession(player.entity)
+                    components[44] = [0, 0, 0]
+                    components[75] = [0, 0, None, 0]
+                update = EntityUpdate(
+                    player.entity, OP_UPDATE, lambda origin, values=components: world.update(origin, values),
+                )
+                if viewer is player and player.escort_hud_refresh:
+                    player.escort_hud_team_update = update
+                client.queue_entities([update])
+        if old_body is not None:
+            if player.client is not None and player.spawned:
+                player.client.queue_entities([EntityUpdate(old_body, OP_DESTROY)])
+            self.destroy_for_others(player, old_body)
+        self.send_controller(player)
+        if player.spawned and self.in_custom_warmup and self.game_map.custom_start == START_WHEN_FULL:
+            self._check_automatic_assembly(self.environment.wall_time(callsite="match.custom_team_move"))
+        return True
+
     def switch_hero(self, player: Player, hero: Hero) -> bool:
         """The body of a picked hero. The first one just comes. A switch creates the new body under a
         new id at the spawn point, moves the player's components 44 and 75 to it and destroys the old
         body. These records can share a datagram in that order. When the packet budget splits them,
         the later records wait for acknowledgement of their prerequisites."""
+        if player.team == SPECTATOR_TEAM:
+            return False
         old = player.body if player.has_body else None
         old_hero = player.hero.guid if old is not None else None
         if old is not None:
@@ -1686,13 +2408,18 @@ class Match:
         """Before hero select counts down: the players are still joining."""
         return self.assemble_ends is None
 
-    def free_places(self) -> list[int]:
+    def free_places(self, *, loaded_only: bool = False) -> list[int]:
         """Places left per team: the mode's team sizes less the players still in the match (one entry
-        for free for all)."""
+        for free for all). The custom start gate counts only players already in the world."""
         playing = [player for player in self.players if not player.gone]
+        if loaded_only:
+            playing = [
+                player for player in playing
+                if player.spawned and player.client is not None and player.client.leaving_since is None
+            ]
         sizes = self.game_map.team_sizes
         if self.game_map.free_for_all:
-            return [sizes[0] - len(playing)]
+            return [sizes[0] - sum(player.team != SPECTATOR_TEAM for player in playing)]
         return [size - sum(1 for player in playing if player.team == team) for team, size in enumerate(sizes)]
 
     def roles_taken(self) -> list[dict[int, int]]:

@@ -92,13 +92,15 @@ def _talon_voice(viewer, source, stimulus: int, line: int) -> None:
     queue_voice_notice(viewer, source.entity, stimulus, line, anchor=source.entity)
 
 
-def queue_voice_notice(viewer, source: int, stimulus: int, line: int, *, anchor: int | None) -> None:
+def queue_voice_notice(
+    viewer, source: int, stimulus: int, line: int, *, anchor: int | None, listener: int | None = None,
+) -> int | None:
     client = getattr(viewer, "client", None)
     if client is None:
         return
-    client.queue_combat_notice(anchor, TALON_HIT_NOTICE, {
+    return client.queue_combat_notice(anchor, TALON_HIT_NOTICE, {
         "+0x78": {"+0x0": source},
-        "+0x7C": {"+0x0": viewer.body},
+        "+0x7C": {"+0x0": viewer.body if listener is None else listener},
         "+0x80": {"+0x0": 0xFFFFFFFF},
         "+0x88": stimulus,
         "+0x90": line,

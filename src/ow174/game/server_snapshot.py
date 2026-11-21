@@ -22,6 +22,7 @@ from ow174.game import (
     contacts,
     correction,
     heroselect,
+    match_audio,
     notices,
     npc_navigation,
     observers,
@@ -87,7 +88,7 @@ FIELDS = {
         "stream source live volleys death_frames death_snapshot nameplate_update historical_death"
     ),
     Match: _names(
-        "environment id game_map card skin_of emote_aliases_of emote_unlocks_of "
+        "environment id game_map escort assault card skin_of emote_aliases_of emote_unlocks_of "
         "emote_blend_trees_of wheel_cosmetics_of tick "
         "controller assemble_ends assembled players _body_messages started on_leave ended bots "
         "_npc_planning_turn "
@@ -96,9 +97,15 @@ FIELDS = {
     ),
     Player: _names("match slot account_lo name rank role card card_sent card_again hero team quanta entity "
                    "body has_body skin client gone loaded_at steps_done spawned spawn mover commands "
-                   "body_script body_script_failed seen shown script mode_script next_countdown "
-                   "select_open controller_hero "
-                   "stats stats_sent next_stats"),
+                   "body_script body_script_failed seen shown script mode_script escort_mode_state "
+                   "escort_hud_bound escort_payload_ready escort_payload_script escort_payload_state "
+                   "escort_hud_team_update escort_hud_refresh escort_checkpoint_scripts escort_room_visuals "
+                   "escort_door_scripts escort_door_states assault_mode_state assault_hud_bound "
+                   "assault_point_scripts assault_point_states assault_outline_scripts "
+                   "assault_outline_states "
+                   "assault_outline_visuals control_setup_music next_countdown match_audio "
+                   "select_open assembly_pick_confirmed controller_hero "
+                   "stats stats_sent next_stats capture_sound_instance"),
     ShownController: _names("script create_acked pick card_again possession"),
     CommandQueue: _names("last_frame epoch wraps"),
     combat.Combat: _names(
@@ -146,8 +153,8 @@ FIELDS = {
     ),
     BitWriter: _names("value count"),
     world.RecordWriter: _names("value count origin"),
-    world.Movement: _names("position yaw pitch velocity flags throttles input_frame input_throttles "
-                           "air_ticks gravity frame crouch_frame spring spring_speed fall"),
+    world.Movement: _names("position yaw pitch body_pitch velocity flags throttles input_frame "
+                           "input_throttles air_ticks gravity frame crouch_frame spring spring_speed fall"),
     bots.Bot: _names(
         "entity spawner hero_data hints dead body_script records_from hero name body team health speed accel "
         "brake pace direction position yaw velocity firing route index wait target start keys turning held "
@@ -172,7 +179,9 @@ DATACLASSES = (
     driver.WheelCallout, driver.WheelSprayEvent,
     play.Resource, play.InvocationContext, play.Request,
     GameMap, Hero, Spawn, Handoff, LoadState, correction.SendToken, MoverData,
-    heroselect.Controller, notices.Switch, combat.HitDef, combat.Target, combat.Rocket, combat.SplitVolley,
+    heroselect.Controller, notices.Switch, notices.WheelChat, combat.HitDef, combat.Target, combat.Rocket,
+    match_audio.FollowUp, match_audio.Playback, match_audio.Timeline,
+    combat.SplitVolley,
     projectiles.Mine, projectiles.MineView, projectiles.Shot, projectiles.ShotRecord,
     projectiles._ObservedProjectile, projectiles._ProjectileArrival,
     driver.Snapshot, driver.OwnerReport, statescript.Graph,
@@ -465,6 +474,8 @@ def export_server_state(server, *, archives=(), collision_provider=None, assets=
             _fail("unregistered archived match type")
         if match.scene_host_factory is not None:
             _fail('shared scene script runtime storage is not implemented')
+        if match.objective_round is not None:
+            _fail("custom objective round storage is not implemented")
         if (match.environment is not server.environment or match.skin_of is not server.skin_of
                 or match.emote_aliases_of is not server.emote_aliases_of
                 or match.emote_unlocks_of is not server.emote_unlocks_of

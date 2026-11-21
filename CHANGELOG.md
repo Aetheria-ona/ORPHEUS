@@ -8,6 +8,33 @@ This log records tested changes and their acceptance status. Entries are grouped
 
 - Add portable Linux Proton runtime resolution (`ow174.launcher.proton`) and explicit handle-bound Wine relay injection (`BoundProcess` in `ow174.launcher.inject` and `ow174.launcher.proton_inject`). `resolve_proton_runtime` reads `WINEPREFIX`, `STEAM_COMPAT_TOOL_PATHS` (disambiguated via `/proc/<pid>/maps`), and Wine sync flags (`WINEFSYNC`, `WINEESYNC`, `WINE_NTSYNC`, `PROTON_ENABLE_NTSYNC`, `WINEFUTEX2`) from `--runtime-pid` and fails closed on ambiguity or invalid values. Injection requires explicit `--win-pid`, `--creation-time`, and `--game-exe` (from `--list`) rather than claiming automatic Linux-to-Windows PID matching, and `BoundProcess` retains a single Windows process handle across identity verification, module snapshots, `LoadLibraryW` injection, and exported `worker()` startup without re-opening by PID. Verified with synthetic unit tests, real Windows embeddable Python `-I` helper invocation, an isolated A->B process-replacement check under Proton 10.0 and Proton 11.0, and live Overwatch `1.74.0.0.104319` (`enUS`) client login to the main menu under Proton 10.0, Proton 11.0, Proton Experimental, and Proton Hotfix (`relays=1`, `err=0`).
 
+#### Custom objective modes
+
+- Run a full single round of Assault and Hybrid, from assembly and setup through capture, overtime, and results. Restore the native objective HUD, world waypoints, and spawn progression, including the transition from point A to the payload in Hybrid.
+- Restore multi-round Control with authored submaps, capture and scoring overrides, fixed-point selection, a configurable score to win, spawn-room healing, and the native round and match presentation.
+- Apply the custom payload speed setting, follow authored route stops and automatic passages, and update gate collision and rubble as the cart advances. Preserve the map-loading spawn entities and update the active hero-selection spawn lists as checkpoints change.
+- Refresh the reached checkpoint markers after an acknowledged team change without affecting other players. Verified on Gibraltar with the original 104319 client.
+- Restore team-relative match announcements, countdowns, and objective audio. Show tenths on objective clocks for the last ten seconds.
+
+### 2026-11-20
+
+#### Custom Escort
+
+- Restore the full single-round Escort flow from assembly and setup through payload movement, checkpoints, overtime, and results.
+- Restore the native Escort progress HUD. The mode creates the objective HUD once and synchronizes the cart's route, checkpoint markers, current distance, and phase. Verified the progress bar, cart icon, and route markers on Gibraltar in the original 104319 client.
+- Synchronize the nearby attackers and defenders and the cart's direction for the pusher count, contest state, and movement arrows. Encrypted loopback covers these values. Original-client checks for the count, arrows, and final gate poses are pending. Health-pack pickup, multi-round play, and stored-state replay remain open.
+
+### 2026-11-19
+
+#### Private custom games
+
+- Restore build 104319 private room creation, map previews, multipart preset saves, team and room names, slot changes, match handoff and return. Preserve the Total Mayhem preset after a save. Prepare Capture the Flag, Team Deathmatch, Deathmatch and Bounty Hunter handoff, including shared arena spawns and correct free-for-all roster encoding.
+- Enable in-match lobby controls for renames, team and spectator changes, next-match settings, return and restart. Honor the immediate, full-room and manual start policies. Keep the native waiting and assembly prompts, support confirming and changing heroes during assembly, and reset the old hero and pick on team change. Preserve the localized loading and first-round objective titles.
+- Show the player's localized communication-wheel chat on their controller in Deathmatch and Bounty Hunter.
+- Run a single Escort round with setup, cart movement and collision, checkpoint progress, overtime and results. Load Escort objectives, health-pack placements and eligible scenery using catalogs generated from local 104319 data.
+- Fix Escort spawn-room logic. Select respawns using the current checkpoint and update doors, collision, and team-specific barriers as the round advances. Keep players supported by the moving payload and synchronize its segment and overall progress to the client.
+- The original client verified basic private room and map loading, team and spectator transitions, in-match room controls, and returning and restarting. Remaining checks include preset subtitles, assembly prompts, free-for-all chat styling, and multi-client spectating. Shared rooms and Workshop execution remain open.
+
 ### 2026-11-18
 
 - Mirror the synthetic [owner-first-command-anchor-v1](fixtures/behavior/owner-first-command-anchor-v1.json) contract in `tests/public/test_behavior_contracts.py` against `CommandQueue.before_limit`, keeping Python and Rust first-command admission aligned across fresh body scripts and existing input history.
